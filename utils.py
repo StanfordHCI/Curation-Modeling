@@ -30,6 +30,13 @@ def get_config(config_path = None):
         config["device"] = "cpu"
         config["gpus"] = None
     return config, log_path
+    
+def join_sets(sets):
+    full_set = set()
+    for a_set in sets:
+        full_set.update(a_set)
+    return full_set
+    
 
 def save_model(model, epoch, eval_acc, optim, save_dir, type = "latest"):
     save_path = os.path.join(save_dir, f"{type}.pt")
@@ -53,7 +60,7 @@ def load_model(save_dir, model, optim, initial_epoch, best_eval_acc, type = "lat
         optim.load_state_dict(save_dict['optimizer'])
         initial_epoch = save_dict['epoch']
         best_eval_acc = save_dict['eval_acc']
-    return model, optim, initial_epoch, best_eval_acc
+    return model, optim, initial_epoch, best_eval_acc, save_dict
 
 def get_ctr_model(model_type):
     import deepctr_torch.models

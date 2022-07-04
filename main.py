@@ -21,7 +21,7 @@ now = datetime.datetime.now()
 with open(log_path, 'a') as log:
     log.write("-----------------" + f"{now.year}/{now.month}/{now.day} {now.hour}:{now.minute}" + "-----------------\n")
 
-def evaluate_model(model, test_model_input, test_data, feature_names, target):
+def test_model_performance(model, test_model_input, test_data, feature_names, target):
     with open(log_path, 'a') as log:
         eval_all_test_data = model.evaluate(test_model_input, test_data[target].values, batch_size=config['batch_size'])
         debug(eval_all_test_data=eval_all_test_data)
@@ -98,7 +98,7 @@ def train_model(model, x=None, y=None, batch_size=None, epochs=1, verbose=1, ini
     optim = model.optim
     best_eval_acc = 0
     if config["load_pretrained_model"]:
-        model, optim, initial_epoch, best_eval_acc = load_model(config["save_model_dir"], model, optim, initial_epoch, best_eval_acc)
+        model, optim, initial_epoch, best_eval_acc, save_dict = load_model(config["save_model_dir"], model, optim, initial_epoch, best_eval_acc)
     if model.gpus:
         print('parallel running on these gpus:', model.gpus)
         _model = torch.nn.DataParallel(model, device_ids=model.gpus)
@@ -188,5 +188,5 @@ model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"])
 
 if __name__ == "__main__":
     history = train_model(model, train_model_input, train_data[target].values, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2) # , callbacks=[ModelCheckpoint(config["save_model_path"])]
-    model, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
-    evaluate_model(model, test_model_input, test_data, feature_names, target)
+    model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
+    test_model_performance(model, test_model_input, test_data, feature_names, target)
