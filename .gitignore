@@ -2,6 +2,7 @@
 .idea/
 super_debug/
 data/
+output/
 trained_models/
 
 # Byte-compiled / optimized / DLL files

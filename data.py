@@ -1,4 +1,9 @@
+from collections import Counter, defaultdict
 import random
+import warnings
+
+from tqdm import tqdm 
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
@@ -12,10 +17,11 @@ def load_dataset(unit_test = False):
     vote_data = pd.read_csv('data/reddit/44_million_votes.txt', sep = '\t')
     vote_data['SUBMISSION_ID'] = vote_data['SUBMISSION_ID'].astype(str)
     debug(vote_data_num = len(vote_data))
-    if unit_test:
-        all_submission_ids = list(set(vote_data['SUBMISSION_ID']))
-        selected_submission_ids = set(random.sample(all_submission_ids, k = int(0.03 * len(all_submission_ids))))
-        vote_data = vote_data[vote_data['SUBMISSION_ID'].isin(selected_submission_ids)] 
+    if unit_test: # sample 10% of the users, include all the voting data involving these users
+        all_usernames = list(set(vote_data['USERNAME']))
+        random.seed(42)
+        selected_usernames = set(random.sample(all_usernames, k = int(0.2 * len(all_usernames))))
+        vote_data = vote_data[vote_data['USERNAME'].isin(selected_usernames)] 
         debug(vote_data_num = len(vote_data))
     for vote in vote_data['VOTE']:
         assert vote == 'upvote' or vote == 'downvote', f'Vote {vote} is invalid'
@@ -45,17 +51,23 @@ def clear_data(data, sparse_features, dense_features):
 
     return data
 
-def extract_features(data, sparse_features, dense_features, target):
-    for feat in sparse_features:
+def transform_features(data, sparse_features, dense_features, target):
+    original_feature_map = defaultdict(dict)
+    for feature_name in sparse_features:
         lbe = LabelEncoder()
-        data[feat] = lbe.fit_transform(data[feat])
+        original_features = data[feature_name]
+        data[feature_name] = lbe.fit_transform(original_features)
+        for i, transformed_feature in enumerate(data[feature_name]):
+            if transformed_feature not in original_feature_map[feature_name]:
+                original_feature_map[feature_name][transformed_feature] = original_features[i]
+
     lbe = LabelEncoder()
     data[target[0]] = lbe.fit_transform(data[target[0]])
     # dense numerical features -> [0,1]
     mms = MinMaxScaler(feature_range=(0,1))
     data[dense_features] = mms.fit_transform(data[dense_features])
     debug(data=data)
-    return data
+    return data, original_feature_map
 
 def get_feature_columns(data, sparse_features, sparse_features_embed_dims, dense_features):
     sparse_feature_columns = [SparseFeat(feat, vocabulary_size=data[feat].nunique(),embedding_dim=sparse_features_embed_dims[feat]) for i,feat in enumerate(sparse_features)] # count #unique features for each sparse field, transform sparse features into dense vectors by embedding techniques
@@ -70,37 +82,65 @@ def get_feature_columns(data, sparse_features, sparse_features_embed_dims, dense
     debug(feature_names=feature_names)
     return all_feature_columns, feature_names
 
-def generate_model_input(data, feature_names):
-    train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
+def generate_model_input(data:pd.DataFrame, feature_names, train_at_least_n_votes = 10):
+    # train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
+    train_data, test_data = [], []
+    submission_votes = defaultdict(list)
+    for row_i, row in tqdm(data.iterrows()):
+        submission_votes[row["SUBMISSION_ID"]].append(row)
+    random.seed(42)
+    for submission_id in tqdm(list(submission_votes.keys())):
+        votes_data = submission_votes[submission_id]
+        if len(votes_data) > train_at_least_n_votes:
+            train_i = random.sample(range(len(votes_data)), train_at_least_n_votes)
+            for data_i, vote_data in enumerate(votes_data):
+                if data_i in train_i:
+                    train_data.append(vote_data)
+                else:
+                    test_data.append(vote_data)
+    train_data = pd.DataFrame(train_data); test_data = pd.DataFrame(test_data)
+    debug(train_vote_num = len(train_data), test_vote_num = len(test_data))
     train_model_input = {name:train_data[name] for name in feature_names}
     test_model_input = {name:test_data[name] for name in feature_names}
     return train_model_input, test_model_input, train_data, test_data
 
 def get_model_input(config):
     prepared_data_path = config["prepared_data_path"]
+    if not config["unit_test"]:
+        assert "small" not in config["prepared_data_path"]
     if config["save_and_load_prepared_data"] and os.path.exists(prepared_data_path):
         debug("Loading prepared data...")
         with open(prepared_data_path, "rb") as f:
-            all_feature_columns, target, train_model_input, test_model_input, feature_names, train_data, test_data = pickle.load(f)
+            all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = pickle.load(f)
     else:
         all_data = load_dataset(config["unit_test"])
         sparse_features_embed_dims, sparse_features, dense_features, target = get_selected_feature()
         cleared_data = clear_data(all_data, sparse_features, dense_features)
-        featured_data = extract_features(cleared_data, sparse_features, dense_features, target)
+        featured_data, original_feature_map = transform_features(cleared_data, sparse_features, dense_features, target)
         all_feature_columns, feature_names = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, dense_features)
-        train_model_input, test_model_input, train_data, test_data = generate_model_input(featured_data, feature_names)
+        train_model_input, test_model_input, train_data, test_data = generate_model_input(featured_data, feature_names, train_at_least_n_votes = config["train_at_least_n_votes"])
         if config["save_and_load_prepared_data"]:
             with open(prepared_data_path, "wb") as f:
-                pickle.dump((all_feature_columns, target, train_model_input, test_model_input, feature_names, train_data, test_data), f)
+                pickle.dump((all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data), f)
             debug(f"Prepared data saved to {prepared_data_path}")
-    return all_feature_columns, target, train_model_input, test_model_input, feature_names, train_data, test_data
+    return all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data
 
-def analyze_data(train_data, test_data):
+def analyze_data(train_data, test_data, original_feature_map):
     debug(train_upvote = sum(train_data["VOTE"] == 1),
         train_downvote = sum(train_data["VOTE"] == 0),
         test_upvote = sum(test_data["VOTE"] == 1),
         test_downvote = sum(test_data["VOTE"] == 0),
         )
+    subreddit_votes = defaultdict(Counter)
+    for row_i, row in train_data.iterrows():
+        subreddit_votes[row["SUBREDDIT"]][row["VOTE"]] += 1
+    for subreddit in subreddit_votes:
+        subreddit_votes[subreddit]["downvote_rate"] = 100 * subreddit_votes[subreddit][0] / (subreddit_votes[subreddit][1] + subreddit_votes[subreddit][0])
+        subreddit_votes[subreddit]["subreddit"] = original_feature_map["SUBREDDIT"][subreddit]
+    subreddit_votes = pd.DataFrame(list(subreddit_votes.values())).set_index("subreddit")
+    debug(subreddit_votes=subreddit_votes)
+    subreddit_votes.to_csv("output/subreddit_votes.csv")
+
     
     """
     import seaborn as sns
@@ -109,9 +149,10 @@ def analyze_data(train_data, test_data):
     ax.figure.savefig("data/reddit/output.png")
     """
 if __name__ == '__main__':
-    config = get_config() # default config
-    all_feature_columns, target, train_model_input, test_model_input, feature_names, train_data, test_data = get_model_input(config)
-    analyze_data(train_data, test_data)
+    CONFIG_PATH = "configs/debug.yml"
+    config, log_path = get_config(CONFIG_PATH) # default config
+    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
+    analyze_data(train_data, test_data, original_feature_map)
 
 
 """

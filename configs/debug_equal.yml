@@ -1,5 +1,5 @@
 unit_test: True
 model_type: MLR
 prepared_data_path: data/reddit/prepared_small_data.pt
-user_normalization: null # equal
+user_normalization: equal # equal
 downvote_weight: 7.3

@@ -1,3 +1,4 @@
+### train
 device: 0 # -1 for using cpu, 0 for single gpu, [0,1,2,3] for multiple gpus
 save_and_load_prepared_data: True
 prepared_data_path: data/reddit/prepared_data.pt
@@ -7,3 +8,16 @@ learning_rate: 0.01
 unit_test: False
 load_pretrained_model: False
 model_type: MLR
+train_at_least_n_votes: 5
+# weight
+downvote_weight: 3.5
+user_normalization: null # null for no normalization, equal for assigning user weight = 1/votes,
+
+### curation modeling
+upvote_downvote_ratio_thres: 0.9
+single_user_as_cluster: False
+user_clustering_method: "neural" # or "votes"
+active_user_votes_thres: 5
+cluster_user_num_lower_thres: 5
+cluster_user_num_upper_thres: 500
+preferred_submissions_venn_figure_dir: output/figures/preferred_subs

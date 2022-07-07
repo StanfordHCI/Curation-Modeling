@@ -1,3 +1,4 @@
+from collections import Counter
 import datetime
 import os
 import time
@@ -37,9 +38,24 @@ def test_model_performance(model, test_model_input, test_data, feature_names, ta
         debug(eval_all_downvote_data=eval_all_downvote_data)
         log.write("eval_all_downvote_data:" + str(eval_all_downvote_data)+"\n")
 
+def get_train_normalization_weights(train_data:pd.DataFrame, config):
+    upvote_downvote_weights = np.array(1 * (train_data["VOTE"] == 1) + config["downvote_weight"] * (train_data["VOTE"] == 0))
+    # weight = (1. * (y == 1) + 3.5 * (y == 0))[:, 0]
+    user_votes_counter = Counter(train_data["USERNAME"])
+    user_weights = np.array([100/user_votes_counter[x] for x in train_data["USERNAME"]])
+    # upvote_downvote_weights = np.ones([len(train_data)])
+    # user_weights = np.ones([len(train_data)])
+    # user_votes_counter = Counter()
+    # for row_i, (index, row) in enumerate(train_data.iterrows()):
+    #     upvote_downvote_weights[row_i] = 1 if row["VOTE"] == 1 else config["downvote_weight"]
+    #     user_votes_counter[row["USERNAME"]] += 1
+    # if config["user_normalization"] == "equal":
+    #     for row_i, (index, row) in enumerate(train_data.iterrows()):
+    #         user_weights[row_i] = 1/user_votes_counter[row["USERNAME"]]
+    debug(upvote_downvote_weights * user_weights)
+    return upvote_downvote_weights * user_weights
 
-def train_model(model, x=None, y=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0.,
-        validation_data=None, shuffle=True):
+def train_model(model, x=None, y=None, weights=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True):
     """
 
     :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
@@ -53,34 +69,20 @@ def train_model(model, x=None, y=None, batch_size=None, epochs=1, verbose=1, ini
     :param validation_data: tuple `(x_val, y_val)` or tuple `(x_val, y_val, val_sample_weights)` on which to evaluate the loss and any model metrics at the end of each epoch. The model will not be trained on this data. `validation_data` will override `validation_split`.
     :param shuffle: Boolean. Whether to shuffle the order of the batches at the beginning of each epoch.
     """
-    if isinstance(x, dict):
-        x = [x[feature] for feature in model.feature_index]
+    assert isinstance(x, dict)
+    x = [x[feature] for feature in model.feature_index] # turn into a list of numpy arrays
     for i, _ in enumerate(x): 
         if _.isnull().values.any(): raise ValueError(i)
     do_validation = False
-    if validation_data:
-        do_validation = True
-        if len(validation_data) == 2:
-            val_x, val_y = validation_data
-            val_sample_weight = None
-        elif len(validation_data) == 3:
-            val_x, val_y, val_sample_weight = validation_data  # pylint: disable=unpacking-non-sequence
-        else:
-            raise ValueError('When passing a `validation_data` argument, it must contain either 2 items (x_val, y_val), or 3 items (x_val, y_val, val_sample_weights), or alternatively it could be a dataset or a dataset or a dataset iterator. However we received `validation_data=%s`' % validation_data)
-        if isinstance(val_x, dict):
-            val_x = [val_x[feature] for feature in model.feature_index]
-
-    elif validation_split and 0. < validation_split < 1.:
+    if validation_split and 0. < validation_split < 1.:
         do_validation = True
         if hasattr(x[0], 'shape'):
             split_at = int(x[0].shape[0] * (1. - validation_split))
         else:
             split_at = int(len(x[0]) * (1. - validation_split))
-        x, val_x = (slice_arrays(x, 0, split_at),
-                    slice_arrays(x, split_at))
-        y, val_y = (slice_arrays(y, 0, split_at),
-                    slice_arrays(y, split_at))
-
+        x, val_x = (slice_arrays(x, 0, split_at), slice_arrays(x, split_at))
+        y, val_y = (slice_arrays(y, 0, split_at), slice_arrays(y, split_at))
+        weights, val_weights = (slice_arrays(weights, 0, split_at), slice_arrays(weights, split_at))
     else:
         val_x = []
         val_y = []
@@ -88,7 +90,7 @@ def train_model(model, x=None, y=None, batch_size=None, epochs=1, verbose=1, ini
         if len(x[i].shape) == 1:
             x[i] = np.expand_dims(x[i], axis=1)
 
-    train_tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y))
+    train_tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights)) # TODO: weights
     if torch.isnan(train_tensor_data.tensors[0]).any(): raise ValueError('nan')
     if batch_size is None:
         batch_size = 256
@@ -106,8 +108,7 @@ def train_model(model, x=None, y=None, batch_size=None, epochs=1, verbose=1, ini
     else:
         _model = model
 
-    train_loader = DataLoader(
-        dataset=train_tensor_data, shuffle=shuffle, batch_size=batch_size)
+    train_loader = DataLoader(dataset=train_tensor_data, shuffle=shuffle, batch_size=batch_size)
 
     sample_num = len(train_tensor_data)
     steps_per_epoch = (sample_num - 1) // batch_size + 1
@@ -120,16 +121,17 @@ def train_model(model, x=None, y=None, batch_size=None, epochs=1, verbose=1, ini
         loss_epoch = 0
         total_loss_epoch = 0
         train_result = {}
-        for _, (x_train, y_train) in tqdm(enumerate(train_loader)):
+        for _, (x_train, y_train, weight_train) in tqdm(enumerate(train_loader)):
             x = x_train.to(model.device).float()
             y = y_train.to(model.device).float()
-            weight = (1. * (y == 1) + 3.5 * (y == 0))[:, 0]
+            weight_train = weight_train.to(model.device).float()
+            
             if torch.isnan(x).any(): raise ValueError("nan")
 
             y_pred = _model(x).squeeze()
 
             optim.zero_grad()
-            loss = loss_func(y_pred, y.squeeze(), weight = weight, reduction='sum')
+            loss = loss_func(y_pred, y.squeeze(), weight = weight_train, reduction='sum')
             reg_loss = model.get_regularization_loss()
 
             total_loss = loss + reg_loss + model.aux_loss
@@ -179,7 +181,7 @@ def train_model(model, x=None, y=None, batch_size=None, epochs=1, verbose=1, ini
             save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"], "best")
             
 
-all_feature_columns, target, train_model_input, test_model_input, feature_names, train_data, test_data = get_model_input(config)
+all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
 # from deepctr_torch.models import MLR as CTRModel # xDeepFM is best
 CTRModel = get_ctr_model(config["model_type"])
 model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
@@ -187,6 +189,7 @@ model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"])
 
 
 if __name__ == "__main__":
-    history = train_model(model, train_model_input, train_data[target].values, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2) # , callbacks=[ModelCheckpoint(config["save_model_path"])]
+    train_weights = get_train_normalization_weights(train_data, config)
+    history = train_model(model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2) # , callbacks=[ModelCheckpoint(config["save_model_path"])]
     model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
     test_model_performance(model, test_model_input, test_data, feature_names, target)
