@@ -1,7 +1,10 @@
+import datetime
 import os
 import shutil
 import yaml
 import torch
+from superdebug import debug
+use_debug = True
 def merge_dict(main_dict, new_dict):
     for key, value in new_dict.items():
         if isinstance(value, dict):
@@ -12,13 +15,13 @@ def merge_dict(main_dict, new_dict):
             main_dict[key] = value
     return main_dict
 
-def get_config(config_path = None):
+def get_config(config_path, suffix="_train"):
     default_config = yaml.safe_load(open('default_config.yml', 'r'))
     custom_config = yaml.safe_load(open(config_path, 'r'))
     config = merge_dict(default_config, custom_config)
     config["save_model_dir"] = os.path.join("trained_models", os.path.basename(config_path).split(".")[0])
     os.makedirs(config["save_model_dir"], exist_ok=True)
-    log_path = os.path.join(config["save_model_dir"], os.path.basename(config_path).split(".")[0]+".log")
+    log_path = os.path.join(config["save_model_dir"], os.path.basename(config_path).split(".")[0]+suffix+".log")
     if os.path.exists(log_path): os.remove(log_path)
     shutil.copy(config_path, log_path)
     if config["device"] != -1 and torch.cuda.is_available():
@@ -29,7 +32,12 @@ def get_config(config_path = None):
     else:
         config["device"] = "cpu"
         config["gpus"] = None
-    return config, log_path
+    config["log_path"] = log_path
+    now = datetime.datetime.now()
+    with open(config["log_path"], 'a') as log:
+        log.write("-----------------" + f"{now.year}/{now.month}/{now.day} {now.hour}:{now.minute}" + "-----------------\n")
+    
+    return config
     
 def join_sets(sets):
     full_set = set()
@@ -61,6 +69,16 @@ def load_model(save_dir, model, optim, initial_epoch, best_eval_acc, type = "lat
         initial_epoch = save_dict['epoch']
         best_eval_acc = save_dict['eval_acc']
     return model, optim, initial_epoch, best_eval_acc, save_dict
+
+def print_log(log_path, *strs, **strss):
+    if use_debug:
+        debug(*strs, **strss)
+    else:
+        print(*strs, **strss)
+    strs = [str(x) for x in strs] + [f"{x}:{strss[x]};\t" for x in strss]
+    with open(log_path, "a") as f:
+        f.write(" ".join(strs) + "\n")
+
 
 def get_ctr_model(model_type):
     import deepctr_torch.models

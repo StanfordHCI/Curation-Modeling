@@ -140,7 +140,7 @@ def analyze_data(train_data, test_data, original_feature_map):
     subreddit_votes = pd.DataFrame(list(subreddit_votes.values())).set_index("subreddit")
     debug(subreddit_votes=subreddit_votes)
     subreddit_votes.to_csv("output/subreddit_votes.csv")
-
+    debug("Votes of each subreddit is saved to output/subreddit_votes.csv")
     
     """
     import seaborn as sns
@@ -150,7 +150,7 @@ def analyze_data(train_data, test_data, original_feature_map):
     """
 if __name__ == '__main__':
     CONFIG_PATH = "configs/debug.yml"
-    config, log_path = get_config(CONFIG_PATH) # default config
+    config = get_config(CONFIG_PATH) # default config
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
     analyze_data(train_data, test_data, original_feature_map)
 

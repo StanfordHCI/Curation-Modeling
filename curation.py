@@ -1,3 +1,4 @@
+import argparse
 from collections import Counter, defaultdict
 import os
 import random
@@ -6,13 +7,14 @@ import pandas as pd
 from superdebug import debug
 import torch
 from data import get_model_input
-from utils import get_config, get_ctr_model, join_sets, load_model, save_model, load_model_dict
+from utils import get_config, get_ctr_model, join_sets, load_model, print_log, save_model, load_model_dict
 from venn import venn, pseudovenn
-CONFIG_PATH = "configs/debug.yml"
-config, log_path = get_config(CONFIG_PATH)
 
 def get_best_model(config):
-    from train import model
+    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
+    CTRModel = get_ctr_model(config["model_type"])
+    model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
+    model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
     model, _, _, _, model_dict = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
     assert model_dict is not None, "No trained model"
     state_dict = model_dict["state_dict"]
@@ -116,7 +118,7 @@ def get_user_clusters(selected_users_reps, user_i_user_map:dict, single_user_as_
             usernames_in_clusters[cluster_x].add(original_feature_map["USERNAME"][user_i_user_map[user_i]])
         assert len(join_sets(users_in_clusters.values())) == sum([len(users) for users in users_in_clusters.values()])
         debug(cluster_user_num=str({cluster_x: len(users_in_clusters[cluster_x]) for cluster_x in users_in_clusters}))
-        debug(usernames_in_clusters=usernames_in_clusters)
+        debug(usernames_in_clusters=str(usernames_in_clusters))
     return users_in_clusters, cluster_centers
 
 def predict_cluster_users_preferred_submissions(model, cluster_x_users_subreddit_submissions_data:pd.DataFrame, train_data:pd.DataFrame, feature_names, thres = 10):
@@ -176,21 +178,29 @@ def predict_clusters_preferences(users_in_clusters, unique_submissions, train_da
         cluster_x_users_subreddit_submissions_data = convert_cluster_users_subreddit_submissions_data(cluster_x, users_in_clusters, unique_submissions)
         cluster_x_users_preferred_submissions, cluster_x_preferred_submissions_ranking, cluster_x_users_submission_votes = predict_cluster_users_preferred_submissions(model, cluster_x_users_subreddit_submissions_data, train_data, feature_names, thres = config["upvote_downvote_ratio_thres"])
         clusters_users_preferred_submissions[f"Cluster {cluster_x}"] = cluster_x_users_preferred_submissions
-        print(f"Users in cluster {cluster_x} prefers {len(cluster_x_users_preferred_submissions)}/{len(unique_submissions)} submissions (sorted using %upvotes): {cluster_x_preferred_submissions_ranking[:cluster_x_users_preferred_submissions]}")
+        print_log(config["log_path"], f"Users in cluster {cluster_x} prefers {len(cluster_x_users_preferred_submissions)}/{len(unique_submissions)} submissions (sorted using %upvotes): {cluster_x_preferred_submissions_ranking[:len(cluster_x_users_preferred_submissions)]}")
         if len(clusters_users_preferred_submissions) > 1:
             ax = venn(clusters_users_preferred_submissions) if len(clusters_users_preferred_submissions) <=5 else pseudovenn(clusters_users_preferred_submissions)
             ax.figure.savefig(f"{config['preferred_submissions_venn_figure_dir']}/{len(clusters_users_preferred_submissions)}_clusters.png")
 
 def curation_a_subreddit(a_subreddit, subreddit_active_users, subreddit_votes_counter, user_votes_thres, subreddit_train_submissions, subreddit_test_submissions, user_embedding, train_data, test_data, feature_names, single_user_as_cluster = False):
     a_subreddit_active_users:set = subreddit_active_users[a_subreddit]
-    debug(f"In train data, subreddit {a_subreddit} have {len(a_subreddit_active_users)} active users (who votes >= {user_votes_thres} times), {subreddit_votes_counter[a_subreddit]} votes and {len(subreddit_train_submissions[a_subreddit])} unique submissions. In test data, subreddit {a_subreddit} have {len(subreddit_test_submissions[a_subreddit])} unique submissions.") 
+    print_log(config["log_path"], f"In train data, subreddit {a_subreddit} have {len(a_subreddit_active_users)} active users (who votes >= {user_votes_thres} times), {subreddit_votes_counter[a_subreddit]} votes and {len(subreddit_train_submissions[a_subreddit])} unique submissions. In test data, subreddit {a_subreddit} have {len(subreddit_test_submissions[a_subreddit])} unique submissions.") 
 
     # a_subreddit_users_reps, user_i_user_map = get_user_reps(a_subreddit_users, all_user_embedding=user_embedding, method = "neural")
     a_subreddit_users_reps, user_i_user_map = get_user_reps(a_subreddit_active_users, all_user_embedding=user_embedding, train_data=train_data, selected_submissions = subreddit_train_submissions[a_subreddit], method = config["user_clustering_method"])
     users_in_clusters, cluster_centers = get_user_clusters(a_subreddit_users_reps, user_i_user_map, single_user_as_cluster=single_user_as_cluster)
     predict_clusters_preferences(users_in_clusters, subreddit_test_submissions[a_subreddit], train_data, feature_names, cluster_centers, single_user_as_cluster=single_user_as_cluster)
 
+def parse_config():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", type=str, help="Path to custom config file.")
+    args = parser.parse_args()
+    config = get_config(args.config, "_curation")
+    return config
+
 if __name__ == "__main__":
+    config = parse_config()
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
     model, user_embedding = get_best_model(config)
     debug(user_embedding=user_embedding)
@@ -201,5 +211,6 @@ if __name__ == "__main__":
         print(f"Subreddit {subreddit_id}: {original_feature_map['SUBREDDIT'][subreddit_id]}, {vote_counts} votes")
 
     a_subreddit = int(input("Select a subreddit: ")) # common_subreddits_counts[0][0]
+    print_log(config["log_path"], f"Selected subreddit: {a_subreddit} ({original_feature_map['SUBREDDIT'][a_subreddit]})")
     single_user_as_cluster = config["single_user_as_cluster"]
     curation_a_subreddit(a_subreddit, subreddit_active_users, subreddit_votes_counter, active_user_votes_thres, subreddit_train_submissions, subreddit_test_submissions, user_embedding, train_data, test_data, feature_names, single_user_as_cluster=single_user_as_cluster)

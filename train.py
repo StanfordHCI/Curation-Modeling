@@ -1,3 +1,4 @@
+import argparse
 from collections import Counter
 import datetime
 import os
@@ -16,14 +17,8 @@ from tensorflow.python.keras.callbacks import CallbackList
 from tqdm import tqdm
 import numpy as np
 
-CONFIG_PATH = "configs/debug.yml"
-config, log_path = get_config(CONFIG_PATH)
-now = datetime.datetime.now()
-with open(log_path, 'a') as log:
-    log.write("-----------------" + f"{now.year}/{now.month}/{now.day} {now.hour}:{now.minute}" + "-----------------\n")
-
-def test_model_performance(model, test_model_input, test_data, feature_names, target):
-    with open(log_path, 'a') as log:
+def test_model_performance(model, test_model_input, test_data, feature_names, target, config):
+    with open(config["log_path"], 'a') as log:
         eval_all_test_data = model.evaluate(test_model_input, test_data[target].values, batch_size=config['batch_size'])
         debug(eval_all_test_data=eval_all_test_data)
         log.write("eval_all_test_data:" + str(eval_all_test_data)+"\n")
@@ -42,20 +37,15 @@ def get_train_normalization_weights(train_data:pd.DataFrame, config):
     upvote_downvote_weights = np.array(1 * (train_data["VOTE"] == 1) + config["downvote_weight"] * (train_data["VOTE"] == 0))
     # weight = (1. * (y == 1) + 3.5 * (y == 0))[:, 0]
     user_votes_counter = Counter(train_data["USERNAME"])
-    user_weights = np.array([100/user_votes_counter[x] for x in train_data["USERNAME"]])
-    # upvote_downvote_weights = np.ones([len(train_data)])
-    # user_weights = np.ones([len(train_data)])
-    # user_votes_counter = Counter()
-    # for row_i, (index, row) in enumerate(train_data.iterrows()):
-    #     upvote_downvote_weights[row_i] = 1 if row["VOTE"] == 1 else config["downvote_weight"]
-    #     user_votes_counter[row["USERNAME"]] += 1
-    # if config["user_normalization"] == "equal":
-    #     for row_i, (index, row) in enumerate(train_data.iterrows()):
-    #         user_weights[row_i] = 1/user_votes_counter[row["USERNAME"]]
+    if config["user_normalization"] == "equal":
+        debug(user_normalization = config["user_normalization"])
+        user_weights = np.array([100/user_votes_counter[x] for x in train_data["USERNAME"]])
+    else:
+        user_weights = np.ones([len(train_data)])
     debug(upvote_downvote_weights * user_weights)
     return upvote_downvote_weights * user_weights
 
-def train_model(model, x=None, y=None, weights=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True):
+def train_model(config, model, x=None, y=None, weights=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True):
     """
 
     :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
@@ -174,22 +164,27 @@ def train_model(model, x=None, y=None, weights=None, batch_size=None, epochs=1, 
                     eval_str += " - " + "val_" + name + \
                                 ": {0: .4f}".format(epoch_logs["val_" + name])
             print(eval_str)
-            with open(log_path, 'a') as log:
+            with open(config["log_path"], 'a') as log:
                 log.write(eval_str+"\n")
         save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"])
         if best_eval_acc == eval_result["acc"]:
             save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"], "best")
             
-
-all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
-# from deepctr_torch.models import MLR as CTRModel # xDeepFM is best
-CTRModel = get_ctr_model(config["model_type"])
-model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
-model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
+def parse_config():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", type=str, help="Path to custom config file.")
+    args = parser.parse_args()
+    config = get_config(args.config)
+    return config
 
 
 if __name__ == "__main__":
+    config = parse_config()
+    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
+    CTRModel = get_ctr_model(config["model_type"])
+    model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
+    model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
     train_weights = get_train_normalization_weights(train_data, config)
-    history = train_model(model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2) # , callbacks=[ModelCheckpoint(config["save_model_path"])]
+    history = train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2) # , callbacks=[ModelCheckpoint(config["save_model_path"])]
     model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
-    test_model_performance(model, test_model_input, test_data, feature_names, target)
+    test_model_performance(model, test_model_input, test_data, feature_names, target, config)
