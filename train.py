@@ -4,13 +4,16 @@ import datetime
 import os
 import time
 import pandas as pd
+import sklearn
 import torch
 from superdebug import debug
 from sklearn.metrics import log_loss, roc_auc_score, accuracy_score
 from data import get_model_input
-from utils import get_config, get_ctr_model, load_model, save_model
+from model import get_model
+from utils import get_config, load_model, save_model, to_device
 from deepctr_torch.callbacks import ModelCheckpoint
 from deepctr_torch.layers.utils import slice_arrays
+from deepctr_torch.models.basemodel import BaseModel
 import torch.utils.data as Data
 from torch.utils.data import DataLoader
 from tensorflow.python.keras.callbacks import CallbackList
@@ -46,6 +49,7 @@ def get_train_normalization_weights(train_data:pd.DataFrame, config):
     return upvote_downvote_weights * user_weights
 
 def train_model(config, model, x=None, y=None, weights=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True):
+    # TODO:
     """
 
     :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
@@ -60,7 +64,12 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=None, ep
     :param shuffle: Boolean. Whether to shuffle the order of the batches at the beginning of each epoch.
     """
     assert isinstance(x, dict)
-    x = [x[feature] for feature in model.feature_index] # turn into a list of numpy arrays
+    if model.lm_encoder is not None:
+        assert "input_ids" in x, "Make sure train_model_input contains tokenized reddit text"
+        text_input_ids = x["input_ids"]
+        text_token_type_ids = x["token_type_ids"]
+        text_attention_mask = x["attention_mask"]
+    x = [x[feature] for feature in model.feature_index if feature in x] # turn into a list of numpy arrays
     for i, _ in enumerate(x): 
         if _.isnull().values.any(): raise ValueError(i)
     do_validation = False
@@ -70,17 +79,26 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=None, ep
             split_at = int(x[0].shape[0] * (1. - validation_split))
         else:
             split_at = int(len(x[0]) * (1. - validation_split))
-        x, val_x = (slice_arrays(x, 0, split_at), slice_arrays(x, split_at))
-        y, val_y = (slice_arrays(y, 0, split_at), slice_arrays(y, split_at))
-        weights, val_weights = (slice_arrays(weights, 0, split_at), slice_arrays(weights, split_at))
+        x, val_x = slice_arrays(x, 0, split_at), slice_arrays(x, split_at)
+        y, val_y = slice_arrays(y, 0, split_at), slice_arrays(y, split_at)
+        weights, val_weights = slice_arrays(weights, 0, split_at), slice_arrays(weights, split_at)
+        if model.lm_encoder is not None:
+            text_input_ids, val_text_input_ids = text_input_ids[:split_at], text_input_ids[split_at:]
+            text_token_type_ids, val_text_token_type_ids = text_token_type_ids[:split_at], text_token_type_ids[split_at:]
+            text_attention_mask, val_text_attention_mask = text_attention_mask[:split_at], text_attention_mask[split_at:]
+
+
     else:
-        val_x = []
-        val_y = []
+        val_x, val_y, val_weights, val_text_input_ids, val_text_token_type_ids, val_text_attention_mask = [], [], [], [], [], []
     for i in range(len(x)):
         if len(x[i].shape) == 1:
             x[i] = np.expand_dims(x[i], axis=1)
 
-    train_tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights)) # TODO: weights
+    if model.lm_encoder is not None:
+        train_tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights),text_input_ids,text_token_type_ids,text_attention_mask)
+    else:
+        train_tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights))
+
     if torch.isnan(train_tensor_data.tensors[0]).any(): raise ValueError('nan')
     if batch_size is None:
         batch_size = 256
@@ -111,17 +129,25 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=None, ep
         loss_epoch = 0
         total_loss_epoch = 0
         train_result = {}
-        for _, (x_train, y_train, weight_train) in tqdm(enumerate(train_loader)):
-            x = x_train.to(model.device).float()
-            y = y_train.to(model.device).float()
-            weight_train = weight_train.to(model.device).float()
-            
-            if torch.isnan(x).any(): raise ValueError("nan")
+        for _, train_input in tqdm(enumerate(train_loader)):
+            if model.lm_encoder is not None:
+                (x_train, y_train, weight_train, text_input_ids_train, text_token_type_ids_train, text_attention_mask_train) = train_input
+                text_input_ids, text_token_type_ids, text_attention_mask = to_device(model.device, False, text_input_ids_train, text_token_type_ids_train, text_attention_mask_train)
+                encoder_hidden = model.lm_encoder(input_ids = text_input_ids, token_type_ids = text_token_type_ids, attention_mask = text_attention_mask).last_hidden_state
+                encoder_hidden_pooled = encoder_hidden.sum(axis=1) / text_attention_mask.sum(axis = -1, keepdim = True)
 
+            else:
+                x_train, y_train, weight_train = train_input
+            # x = x_train.to(model.device).float()
+            # y = y_train.to(model.device).float()
+            # weight = weight_train.to(model.device).float()
+            x, y, weight = to_device(model.device, True, x_train, y_train, weight_train)
+            if model.lm_encoder is not None:
+                x = torch.cat([x, encoder_hidden_pooled], dim = -1)
             y_pred = _model(x).squeeze()
 
             optim.zero_grad()
-            loss = loss_func(y_pred, y.squeeze(), weight = weight_train, reduction='sum')
+            loss = loss_func(y_pred, y.squeeze(), weight = weight, reduction='sum')
             reg_loss = model.get_regularization_loss()
 
             total_loss = loss + reg_loss + model.aux_loss
@@ -135,7 +161,14 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=None, ep
                 for name, metric_fun in model.metrics.items():
                     if name not in train_result:
                         train_result[name] = []
-                    train_result[name].append(metric_fun(y.cpu().data.numpy(), y_pred.cpu().data.numpy().astype("float64")))
+                    if metric_fun != sklearn.metrics.accuracy_score and metric_fun != BaseModel._accuracy_score:
+                        try:
+                            train_result[name].append(metric_fun(y.cpu().data.numpy(), y_pred.cpu().data.numpy().astype("float64"), labels = [0,1]))
+                        except:
+                            pass
+                    else:
+                        train_result[name].append(metric_fun(y.cpu().data.numpy(), y_pred.cpu().data.numpy().astype("float64")))
+
 
         # Add epoch_logs
         epoch_logs["loss"] = total_loss_epoch / sample_num
@@ -181,9 +214,12 @@ def parse_config():
 if __name__ == "__main__":
     config = parse_config()
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
+    """
     CTRModel = get_ctr_model(config["model_type"])
     model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
     model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
+    """
+    model = get_model(config, all_feature_columns)
     train_weights = get_train_normalization_weights(train_data, config)
     history = train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2) # , callbacks=[ModelCheckpoint(config["save_model_path"])]
     model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")

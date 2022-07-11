@@ -3,18 +3,23 @@ from collections import Counter, defaultdict
 import os
 import random
 import shutil
+import numpy as np
 import pandas as pd
 from superdebug import debug
 import torch
 from data import get_model_input
-from utils import get_config, get_ctr_model, join_sets, load_model, print_log, save_model, load_model_dict
+from utils import get_config, join_sets, load_model, print_log, save_model, load_model_dict
+from model import get_model
 from venn import venn, pseudovenn
 
 def get_best_model(config):
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
+    """
     CTRModel = get_ctr_model(config["model_type"])
     model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
     model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
+    """
+    model = get_model(config, all_feature_columns)
     model, _, _, _, model_dict = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
     assert model_dict is not None, "No trained model"
     state_dict = model_dict["state_dict"]
@@ -60,12 +65,12 @@ def get_user_reps(selected_users, all_user_embedding, train_data:pd.DataFrame = 
     for user in selected_users:
         selected_users_bool_vec[user] = True # in_subreddit
     # user_user_i_map = {}
-    user_i_user_map = {}
+    selected_user_i_user_map = {}
     user_i = 0
     for user, in_subreddit in enumerate(selected_users_bool_vec):
         if in_subreddit:
             # user_user_i_map[user] = user_i
-            user_i_user_map[user_i] = user
+            selected_user_i_user_map[user_i] = user
             user_i += 1
     # assert len(user_user_i_map) == len(user_i_user_map)
     if method == "neural":
@@ -84,14 +89,19 @@ def get_user_reps(selected_users, all_user_embedding, train_data:pd.DataFrame = 
         selected_users_reps = selected_users_reps / users_vote_sum # average votes on each submission
         debug(selected_users_reps = selected_users_reps)
 
-    return selected_users_reps, user_i_user_map
+    return selected_users_reps, selected_user_i_user_map
     
-def get_user_clusters(selected_users_reps, user_i_user_map:dict, single_user_as_cluster = False):
+def get_user_clusters(selected_users_reps, selected_user_i_user_map:dict, single_user_as_cluster = False, existing_user_votes=None):
     if single_user_as_cluster:
-        users_in_clusters = {i: {user} for i,user in user_i_user_map.items()}
+        assert existing_user_votes is not None
+        users_in_clusters = list(selected_user_i_user_map.values())
+        users_in_clusters.sort(key=lambda x:existing_user_votes[x])
+        users_in_clusters = users_in_clusters[:10] + users_in_clusters[-10:]
+        users_in_clusters = {i: {user} for i,user in enumerate(users_in_clusters)}
+        # users_in_clusters = {i: {user} for i,user in selected_user_i_user_map.items()}
         cluster_centers = None
     else:
-        n_clusters = int(len(user_i_user_map) / 100)
+        n_clusters = int(len(selected_user_i_user_map) / 100)
         debug(n_clusters=n_clusters) # n_clusters: 118
         debug("Begin clustering...")
         from sklearn.cluster import KMeans
@@ -114,34 +124,48 @@ def get_user_clusters(selected_users_reps, user_i_user_map:dict, single_user_as_
         users_in_clusters = defaultdict(set)
         usernames_in_clusters = defaultdict(set)
         for user_i, cluster_x in enumerate(labels): 
-            users_in_clusters[cluster_x].add(user_i_user_map[user_i])
-            usernames_in_clusters[cluster_x].add(original_feature_map["USERNAME"][user_i_user_map[user_i]])
+            users_in_clusters[cluster_x].add(selected_user_i_user_map[user_i])
+            usernames_in_clusters[cluster_x].add(original_feature_map["USERNAME"][selected_user_i_user_map[user_i]])
         assert len(join_sets(users_in_clusters.values())) == sum([len(users) for users in users_in_clusters.values()])
         debug(cluster_user_num=str({cluster_x: len(users_in_clusters[cluster_x]) for cluster_x in users_in_clusters}))
         debug(usernames_in_clusters=str(usernames_in_clusters))
     return users_in_clusters, cluster_centers
-
-def predict_cluster_users_preferred_submissions(model, cluster_x_users_subreddit_submissions_data:pd.DataFrame, train_data:pd.DataFrame, feature_names, thres = 10):
+def record_existing_votes(train_data:pd.DataFrame):
     # collect existing votes
     existing_votes = {}
+    existing_user_updown_votes = defaultdict(Counter)
+    existing_user_votes = Counter()
+    existing_submission_votes = defaultdict(Counter)
     for row_i, row in train_data.iterrows():
         existing_votes[f'{row["USERNAME"]}-{row["SUBMISSION_ID"]}'] = row["VOTE"]
+        existing_user_updown_votes[row["USERNAME"]][row["VOTE"]] += 1
+        existing_user_votes[row["USERNAME"]] += 1
+        existing_submission_votes[row["SUBMISSION_ID"]][row["VOTE"]] += 1
+    return existing_votes, existing_user_votes, existing_user_updown_votes, existing_submission_votes
+
+def predict_cluster_users_preferred_submissions(model, cluster_x_users_subreddit_submissions_data:pd.DataFrame, train_data:pd.DataFrame, feature_names, existing_votes, thres = 0.9):
 
     # predict unseen votes
     cluster_x_users_subreddit_submissions_input = {name:cluster_x_users_subreddit_submissions_data[name] for name in feature_names}
     predict_cluster_x_users_subreddit_submissions_votes = model.predict(cluster_x_users_subreddit_submissions_input, batch_size=config['batch_size'])
     debug(predict_cluster_x_users_subreddit_submissions_votes=predict_cluster_x_users_subreddit_submissions_votes)
     submission_votes = {}
+    user_confidence = defaultdict(list)
     for row_i, vote in enumerate(predict_cluster_x_users_subreddit_submissions_votes[:, 0]):
         row = cluster_x_users_subreddit_submissions_data.iloc[row_i]
         submission_id = row["SUBMISSION_ID"]
         if submission_id not in submission_votes:
             submission_votes[submission_id] = [0, 0]
+        user_confidence[row["USERNAME"]].append(abs(vote - 0.5))
         if f'{row["USERNAME"]}-{row["SUBMISSION_ID"]}' not in existing_votes:
             vote = int(vote >= 0.5)
         else: # use existing votes if available
             vote = existing_votes[f'{row["USERNAME"]}-{row["SUBMISSION_ID"]}']
         submission_votes[submission_id][vote] += 1
+
+    # analyze user confidence
+    for username in user_confidence:
+        user_confidence[username] = float(np.mean(user_confidence[username]))
 
     # include submissions to preferred_submissions where %upvotes is higher than threshold
     preferred_submissions = set()
@@ -153,9 +177,12 @@ def predict_cluster_users_preferred_submissions(model, cluster_x_users_subreddit
     # sort submissions using %upvotes
     submissions_ranking = list(submission_votes.keys())
     submissions_ranking.sort(reverse=True, key=lambda id: submission_votes[id][-1])
-    return preferred_submissions, submissions_ranking, submission_votes
+    return preferred_submissions, submissions_ranking, submission_votes, user_confidence
 
-def predict_clusters_preferences(users_in_clusters, unique_submissions, train_data, feature_names, cluster_centers=None, single_user_as_cluster = False):
+def predict_clusters_preferences(users_in_clusters, unique_submissions, train_data, feature_names, cluster_centers=None, single_user_as_cluster = False, existing_votes = None, existing_user_updown_votes=None):
+    
+    # users_in_clusters = existing_user_votes.most_common(3) # TODO:
+
     clusters_users_preferred_submissions = {}
     used_cluster_centers = []
     if os.path.exists(config["preferred_submissions_venn_figure_dir"]):
@@ -173,13 +200,15 @@ def predict_clusters_preferences(users_in_clusters, unique_submissions, train_da
                     break
             if similar_center:
                 continue
-        if len(clusters_users_preferred_submissions) >= 6:
-            break
         cluster_x_users_subreddit_submissions_data = convert_cluster_users_subreddit_submissions_data(cluster_x, users_in_clusters, unique_submissions)
-        cluster_x_users_preferred_submissions, cluster_x_preferred_submissions_ranking, cluster_x_users_submission_votes = predict_cluster_users_preferred_submissions(model, cluster_x_users_subreddit_submissions_data, train_data, feature_names, thres = config["upvote_downvote_ratio_thres"])
+        cluster_x_users_preferred_submissions, cluster_x_preferred_submissions_ranking, cluster_x_users_submission_votes, cluster_x_users_confidence = predict_cluster_users_preferred_submissions(model, cluster_x_users_subreddit_submissions_data, train_data, feature_names, existing_votes, thres = config["upvote_downvote_ratio_thres"])
         clusters_users_preferred_submissions[f"Cluster {cluster_x}"] = cluster_x_users_preferred_submissions
-        print_log(config["log_path"], f"Users in cluster {cluster_x} prefers {len(cluster_x_users_preferred_submissions)}/{len(unique_submissions)} submissions (sorted using %upvotes): {cluster_x_preferred_submissions_ranking[:len(cluster_x_users_preferred_submissions)]}")
-        if len(clusters_users_preferred_submissions) > 1:
+        if single_user_as_cluster:
+            user_train_vote_prompt = f"voted {existing_user_updown_votes[list(users_in_clusters[cluster_x])[0]]} in training data, prediction confidence {list(cluster_x_users_confidence.values())[0]}, "
+        else:
+            user_train_vote_prompt = ""
+        print_log(config["log_path"], f"Users in cluster {cluster_x} {user_train_vote_prompt}prefers {len(cluster_x_users_preferred_submissions)}/{len(unique_submissions)} submissions (sorted using %upvotes): {cluster_x_preferred_submissions_ranking[:len(cluster_x_users_preferred_submissions)]}")
+        if len(clusters_users_preferred_submissions) > 1 and len(clusters_users_preferred_submissions) <=6:
             ax = venn(clusters_users_preferred_submissions) if len(clusters_users_preferred_submissions) <=5 else pseudovenn(clusters_users_preferred_submissions)
             ax.figure.savefig(f"{config['preferred_submissions_venn_figure_dir']}/{len(clusters_users_preferred_submissions)}_clusters.png")
 
@@ -187,10 +216,10 @@ def curation_a_subreddit(a_subreddit, subreddit_active_users, subreddit_votes_co
     a_subreddit_active_users:set = subreddit_active_users[a_subreddit]
     print_log(config["log_path"], f"In train data, subreddit {a_subreddit} have {len(a_subreddit_active_users)} active users (who votes >= {user_votes_thres} times), {subreddit_votes_counter[a_subreddit]} votes and {len(subreddit_train_submissions[a_subreddit])} unique submissions. In test data, subreddit {a_subreddit} have {len(subreddit_test_submissions[a_subreddit])} unique submissions.") 
 
-    # a_subreddit_users_reps, user_i_user_map = get_user_reps(a_subreddit_users, all_user_embedding=user_embedding, method = "neural")
-    a_subreddit_users_reps, user_i_user_map = get_user_reps(a_subreddit_active_users, all_user_embedding=user_embedding, train_data=train_data, selected_submissions = subreddit_train_submissions[a_subreddit], method = config["user_clustering_method"])
-    users_in_clusters, cluster_centers = get_user_clusters(a_subreddit_users_reps, user_i_user_map, single_user_as_cluster=single_user_as_cluster)
-    predict_clusters_preferences(users_in_clusters, subreddit_test_submissions[a_subreddit], train_data, feature_names, cluster_centers, single_user_as_cluster=single_user_as_cluster)
+    a_subreddit_active_users_reps, a_subreddit_active_user_i_user_map = get_user_reps(a_subreddit_active_users, all_user_embedding=user_embedding, train_data=train_data, selected_submissions = subreddit_train_submissions[a_subreddit], method = config["user_clustering_method"])
+    existing_votes, existing_user_votes, existing_user_updown_votes, existing_submission_votes = record_existing_votes(train_data)
+    users_in_clusters, cluster_centers = get_user_clusters(a_subreddit_active_users_reps, a_subreddit_active_user_i_user_map, single_user_as_cluster=single_user_as_cluster, existing_user_votes=existing_user_votes)
+    predict_clusters_preferences(users_in_clusters, subreddit_test_submissions[a_subreddit], train_data, feature_names, cluster_centers, single_user_as_cluster=single_user_as_cluster, existing_votes=existing_votes, existing_user_updown_votes=existing_user_updown_votes)
 
 def parse_config():
     parser = argparse.ArgumentParser()

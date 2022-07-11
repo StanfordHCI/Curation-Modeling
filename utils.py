@@ -48,11 +48,17 @@ def join_sets(sets):
 
 def save_model(model, epoch, eval_acc, optim, save_dir, type = "latest"):
     save_path = os.path.join(save_dir, f"{type}.pt")
-    torch.save({'epoch': epoch, 
+    save_dict = {'epoch': epoch, 
 		'state_dict': model.state_dict(), 
 		'eval_acc': eval_acc,
-		'optimizer': optim.state_dict()},
-    save_path)
+		'optimizer': optim.state_dict()}
+    # if lm_encoder is not None:
+    #     save_dict['lm_encoder'] = lm_encoder.state_dict()
+    if "lm_encoder" in " ".join(list(model.state_dict().keys())):
+        debug("Model contains lm_encoder")
+    else:
+        debug("Model doesn't contain lm_encoder")
+    torch.save(save_dict, save_path)
 
 def load_model_dict(save_dir, type = "latest"):
     save_path = os.path.join(save_dir, f"{type}.pt")
@@ -65,6 +71,8 @@ def load_model(save_dir, model, optim, initial_epoch, best_eval_acc, type = "lat
     save_dict = load_model_dict(save_dir, type = type)
     if save_dict:
         model.load_state_dict(save_dict['state_dict'])
+        # if lm_encoder is not None and 'lm_encoder' in save_dict:
+        #     lm_encoder.load_state_dict(save_dict['lm_encoder'])
         optim.load_state_dict(save_dict['optimizer'])
         initial_epoch = save_dict['epoch']
         best_eval_acc = save_dict['eval_acc']
@@ -79,27 +87,12 @@ def print_log(log_path, *strs, **strss):
     with open(log_path, "a") as f:
         f.write(" ".join(strs) + "\n")
 
-
-def get_ctr_model(model_type):
-    import deepctr_torch.models
-    models = {
-        "WDL": deepctr_torch.models.WDL,
-        "DeepFM": deepctr_torch.models.DeepFM,
-        "xDeepFM": deepctr_torch.models.xDeepFM,
-        "AFM": deepctr_torch.models.AFM,
-        "DIFM": deepctr_torch.models.DIFM,
-        "IFM": deepctr_torch.models.IFM,
-        "AutoInt": deepctr_torch.models.AutoInt,
-        "DCN": deepctr_torch.models.DCN,
-        "DCNMix": deepctr_torch.models.DCNMix,
-        "FiBiNET": deepctr_torch.models.FiBiNET,
-        "NFM": deepctr_torch.models.NFM,
-        "MLR": deepctr_torch.models.MLR,
-        "ONN": deepctr_torch.models.ONN,
-        "PNN": deepctr_torch.models.PNN,
-        "CCPM": deepctr_torch.models.CCPM,
-        "DIEN": deepctr_torch.models.DIEN,
-        "DIN": deepctr_torch.models.DIN,
-        "AFN": deepctr_torch.models.AFN,
-    }
-    return models[model_type]
+def batch_func(func, *args):
+    return (func(arg) for arg in args)
+def to_device(device, to_float, *params):
+    if to_float:
+        return batch_func(lambda x:x.to(device).float(), *params)
+        # return (param.to(device).float() for param in params)
+    else:
+        return batch_func(lambda x:x.to(device), *params)
+        # return (param.to(device) for param in params)
