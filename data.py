@@ -135,7 +135,7 @@ def get_model_input(config):
     else:
         all_data = load_dataset(config["sample_data_ratio"])
         if config["use_language_model_encoder"]:
-            all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
+            all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'], config["submission_text_dict_path"])
         sparse_features_embed_dims, sparse_features, dense_features, target = get_selected_feature(config["use_language_model_encoder"])
         cleared_data = clear_data(all_data, sparse_features, dense_features)
         featured_data, original_feature_map = transform_features(cleared_data, sparse_features, dense_features, target)
