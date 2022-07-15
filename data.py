@@ -16,8 +16,11 @@ import os
 import pickle
 
 from utils import get_config
-def load_dataset(sample_data_ratio = 1):
+def sample_load_dataset(sample_data_ratio = 1):
     vote_data = pd.read_csv('data/reddit/44_million_votes.txt', sep = '\t')
+    all_times = list(set(vote_data["CREATED_TIME"]))
+    all_times.sort()
+    debug(all_times[0], all_times[-1], all_times)
     vote_data['SUBMISSION_ID'] = vote_data['SUBMISSION_ID'].astype(str)
     debug(vote_data_num = len(vote_data))
     if sample_data_ratio < 1: # sample 10% of the users, include all the voting data involving these users
@@ -89,8 +92,7 @@ def get_feature_columns(data, sparse_features, sparse_features_embed_dims, dense
     feature_names = get_feature_names(all_feature_columns) # record feature field name
     debug(feature_names=feature_names)
     return all_feature_columns, feature_names
-
-def generate_model_input(data:pd.DataFrame, feature_names, config, train_at_least_n_votes = 10):
+def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 10):
     # train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
     train_data, test_data = [], []
     submission_votes = defaultdict(list)
@@ -112,6 +114,8 @@ def generate_model_input(data:pd.DataFrame, feature_names, config, train_at_leas
     if len(test_data) == 0:
         test_data = data.iloc[-10:]
     debug(train_vote_num = len(train_data), test_vote_num = len(test_data))
+    return train_data, test_data
+def convert_model_input(train_data:pd.DataFrame, test_data:pd.DataFrame, feature_names, config):
     train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
     test_model_input = {name:test_data[name] for name in feature_names if name in test_data}
     if "SUBMISSION_TEXT" in train_data.columns:
@@ -122,7 +126,7 @@ def generate_model_input(data:pd.DataFrame, feature_names, config, train_at_leas
         test_tokenized_submission_text = tokenizer(test_submission_text, padding=True, truncation=True, max_length=512, return_tensors="pt")
         train_model_input.update(train_tokenized_submission_text)
         test_model_input.update(test_tokenized_submission_text)
-    return train_model_input, test_model_input, train_data, test_data
+    return train_model_input, test_model_input
 
 def get_model_input(config):
     prepared_data_path = config["prepared_data_path"]
@@ -133,7 +137,7 @@ def get_model_input(config):
         with open(prepared_data_path, "rb") as f:
             all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = pickle.load(f)
     else:
-        all_data = load_dataset(config["sample_data_ratio"])
+        all_data = sample_load_dataset(config["sample_data_ratio"])
         if config["use_language_model_encoder"]:
             all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'], config["submission_text_dict_path"])
         sparse_features_embed_dims, sparse_features, dense_features, target = get_selected_feature(config["use_language_model_encoder"])
@@ -141,7 +145,8 @@ def get_model_input(config):
         featured_data, original_feature_map = transform_features(cleared_data, sparse_features, dense_features, target)
         all_feature_columns, feature_names = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, dense_features)
         debug(featured_data=featured_data)
-        train_model_input, test_model_input, train_data, test_data = generate_model_input(featured_data, feature_names, config, train_at_least_n_votes = config["train_at_least_n_votes"])
+        train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"])
+        train_model_input, test_model_input = convert_model_input(train_data, test_data, feature_names, config)
         if config["save_and_load_prepared_data"]:
             with open(prepared_data_path, "wb") as f:
                 pickle.dump((all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data), f)
