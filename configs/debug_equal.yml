@@ -1,4 +1,4 @@
-sample_data_ratio: 0.2
+sample_user_ratio: 0.2
 model_type: MLR
 prepared_data_path: data/reddit/prepared_small_data.pt
 user_normalization: equal # equal
