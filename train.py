@@ -31,7 +31,16 @@ def get_normalization_weights(data:pd.DataFrame, config):
     debug(upvote_downvote_weights * user_weights)
     return upvote_downvote_weights * user_weights
 
-
+def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
+    if metric_func != sklearn.metrics.accuracy_score and metric_func != BaseModel._accuracy_score:
+        try:
+            val = metric_func(y_true, y_pred, labels = [0,1], sample_weight=sample_weight)
+        except Exception as e:
+            debug(e)
+            val = 1
+    else:
+        val = metric_func(y_true, y_pred, sample_weight=sample_weight)
+    return val
 def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True):
     """
     :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
@@ -102,7 +111,7 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
     print("Train on {0} samples, validate on {1} samples, {2} steps per epoch".format(
         len(train_tensor_data), len(val_y), steps_per_epoch))
     for epoch in range(initial_epoch, epochs):
-        epoch_logs = {}
+        # epoch_logs = {}
         start_time = time.time()
         loss_epoch = 0
         total_loss_epoch = 0
@@ -123,35 +132,29 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
             optim.step()
 
             if verbose > 0:
-                for name, metric_fun in model.metrics.items():
+                for name, metric_func in model.metrics.items():
                     if name not in train_result:
                         train_result[name] = []
-                    if metric_fun != sklearn.metrics.accuracy_score and metric_fun != BaseModel._accuracy_score:
-                        try:
-                            train_result[name].append(metric_fun(y.cpu().numpy(), y_pred.reshape(y.shape).cpu().data.numpy(), labels = [0,1]))
-                        except:
-                            pass
-                    else:
-                        train_result[name].append(metric_fun(y.cpu().numpy(), y_pred.reshape(y.shape).cpu().data.numpy()))
+                    train_result[name].append(apply_metric(metric_func, y.cpu().numpy(), y_pred.reshape(y.shape).cpu().data.numpy()))
 
 
         # Add epoch_logs
-        epoch_logs["loss"] = total_loss_epoch / sample_num
-        for name, result in train_result.items():
-            epoch_logs[name] = np.sum(result) / steps_per_epoch
+        # epoch_logs["loss"] = total_loss_epoch / sample_num
+        # for name, result in train_result.items():
+            # epoch_logs[name] = np.sum(result) / steps_per_epoch
 
         if do_validation:
             eval_result = evaluate_model(model, val_x, val_text_input_ids, val_text_token_type_ids, val_text_attention_mask, val_y, weights = val_weights, batch_size=batch_size)
-            for name, result in eval_result.items():
-                epoch_logs["val_" + name] = result
+            # for name, result in eval_result.items():
+            #     epoch_logs["val_" + name] = result
             best_eval_acc = max(best_eval_acc, eval_result["acc"])
         # verbose
         if verbose > 0:
             epoch_time = int(time.time() - start_time)
             print('Epoch {0}/{1}'.format(epoch + 1, epochs))
-            eval_str = "{0}s - loss: {1: .4f}".format(epoch_time, epoch_logs["loss"])
-            for name in model.metrics:
-                eval_str += " - " + name + ": {0: .4f}".format(epoch_logs[name])
+            eval_str = "{0}s - loss: {1: .4f}".format(epoch_time, total_loss_epoch / sample_num)
+            for name, result in train_result.items():
+                eval_str += " - " + name + ": {0: .4f}".format(np.sum(result) / steps_per_epoch)
             if do_validation:
                 for name, result in eval_result.items():
                     eval_str += " - " + "val_" + name + ": {0: .4f}".format(result)
@@ -179,6 +182,8 @@ def convert_CTR_model_input(model, dataloader_input):
 def get_data_loader(has_lm_encoder, x, text_input_ids,text_token_type_ids,text_attention_mask, y, weights = None, shuffle=True, batch_size=256):
     if weights is None:
         weights = np.zeros(y.shape, dtype = float)
+    if text_token_type_ids is None:
+        text_token_type_ids = torch.zeros([text_input_ids.shape[0], 0], dtype = int)
     if has_lm_encoder:
         tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights),text_input_ids,text_token_type_ids,text_attention_mask)
     else:
@@ -207,34 +212,14 @@ def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention
     pred_ans =  np.concatenate(pred_ans).astype("float64")
     eval_result = {}
     for wei in [None, weights]:
-        for name, metric_fun in model.metrics.items():
-            eval_result[f"{name}{'_with_weight' if wei is not None else ''}"] = metric_fun(y, pred_ans, sample_weight=wei)
+        for name, metric_func in model.metrics.items():
+            eval_result[f"{name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y, pred_ans, sample_weight=wei)
             if data is not None:
                 for vote in [0, 1]:
-                    eval_result[f"{name}_vote_{vote}{'_with_weight' if wei is not None else ''}"] = metric_fun(y[data["VOTE"] == vote], pred_ans[data["VOTE"] == vote], sample_weight=wei)
+                    eval_result[f"{name}_vote_{vote}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[data["VOTE"] == vote], pred_ans[data["VOTE"] == vote], sample_weight=wei[data["VOTE"] == vote] if wei is not None else None)
     model = model.train()
     return eval_result
 
-
-def test_model_performance(model, test_model_input, test_data, feature_names, target, weights, config):
-    with open(config["log_path"], 'a') as log:
-        # evaluate_model(model, val_x, val_text_input_ids, val_text_token_type_ids, val_text_attention_mask, val_y, weights = None, batch_size=batch_size)
-        text_input_ids = test_model_input["input_ids"]
-        text_token_type_ids = test_model_input["token_type_ids"] if "token_type_ids" in test_model_input else None
-        text_attention_mask = test_model_input["attention_mask"]
-        eval_all_test_data = evaluate_model(model, test_model_input, text_input_ids, text_token_type_ids, text_attention_mask, test_data[target].values, batch_size=config['batch_size']) # TODO:
-        debug(eval_all_test_data=eval_all_test_data)
-        log.write("eval_all_test_data:" + str(eval_all_test_data)+"\n")
-        test_upvote_data = pd.concat([test_data[test_data["VOTE"] == 1], test_data[test_data["VOTE"] == 0].iloc[0:1]], axis=0)
-        test_model_upvote_input = {name:test_upvote_data[name] for name in feature_names}
-        eval_all_upvote_data = evaluate_model(model, test_model_upvote_input, test_upvote_data[target].values, batch_size=config['batch_size'])
-        debug(eval_all_upvote_data=eval_all_upvote_data)
-        log.write("eval_all_upvote_data:" + str(eval_all_upvote_data)+"\n")
-        test_downvote_data = pd.concat([test_data[test_data["VOTE"] == 0], test_data[test_data["VOTE"] == 1].iloc[0:1]], axis=0)
-        test_model_downvote_input = {name:test_downvote_data[name] for name in feature_names}
-        eval_all_downvote_data = evaluate_model(model, test_model_downvote_input, test_downvote_data[target].values, data = test_data, weights = weights, batch_size=config['batch_size'])
-        debug(eval_all_downvote_data=eval_all_downvote_data)
-        log.write("eval_all_downvote_data:" + str(eval_all_downvote_data)+"\n")
 
 def parse_config():
     parser = argparse.ArgumentParser()
@@ -247,11 +232,6 @@ def parse_config():
 if __name__ == "__main__":
     config = parse_config()
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
-    """
-    CTRModel = get_ctr_model(config["model_type"])
-    model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
-    model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
-    """
     model = get_model(config, all_feature_columns)
     train_weights = get_normalization_weights(train_data, config)
     history = train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2) # , callbacks=[ModelCheckpoint(config["save_model_path"])]
@@ -261,4 +241,3 @@ if __name__ == "__main__":
     debug(eval_all_test_data=eval_all_test_data)
     with open(config["log_path"], 'a') as log:
         log.write("eval_all_test_data:" + str(eval_all_test_data)+"\n")
-    # test_model_performance(model, test_model_input, test_data, feature_names, target, test_weights, config)

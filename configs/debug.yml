@@ -5,6 +5,6 @@ user_normalization: null # equal
 downvote_weight: 1
 batch_size: 16
 single_user_as_cluster: True
-num_epochs: 5
+num_epochs: 1
 use_language_model_encoder: True
 language_model_encoder_name: roberta-base
