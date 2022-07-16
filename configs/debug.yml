@@ -7,4 +7,5 @@ batch_size: 16
 single_user_as_cluster: True
 num_epochs: 1
 use_language_model_encoder: True
-language_model_encoder_name: roberta-base
+language_model_encoder_name: google/electra-small-discriminator
+encoder_hidden_dim: 256

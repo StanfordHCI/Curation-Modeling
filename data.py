@@ -111,14 +111,10 @@ def transform_features(data, sparse_features, varlen_sparse_features, dense_feat
 
 def get_feature_columns(data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features):
     sparse_feature_columns = [SparseFeat(feat, vocabulary_size=(data[feat].nunique() if feat in data else 1),embedding_dim=sparse_features_embed_dims[feat]) for i,feat in enumerate(sparse_features)] # count #unique features for each sparse field, transform sparse features into dense vectors by embedding techniques
-    varlen_sparse_feature_columns = [VarLenSparseFeat(SparseFeat(feat, vocabulary_size=data["USERNAME"].nunique(), embedding_dim=varlen_sparse_features_embed_dims[feat]), maxlen=max_len, combiner='mean') for i,feat in enumerate(varlen_sparse_features)]  # TODO:
+    varlen_sparse_feature_columns = [VarLenSparseFeat(SparseFeat(feat, vocabulary_size=data["USERNAME"].nunique()+1, embedding_dim=varlen_sparse_features_embed_dims[feat]), maxlen=Counter(data["SUBMISSION_ID"]).most_common(1)[0][-1], combiner='mean') for i,feat in enumerate(varlen_sparse_features)]
     dense_feature_columns = [DenseFeat(feat, 1,) for feat in dense_features]
-    debug(sparse_feature_columns=sparse_feature_columns, dense_feature_columns=dense_feature_columns)
-    # fixlen_feature_columns = [SparseFeat(feat, vocabulary_size=data[feat].nunique(),embedding_dim=4) for i,feat in enumerate(sparse_features)] + [DenseFeat(feat, 1,) for feat in dense_features]
-    all_feature_columns = sparse_feature_columns + dense_feature_columns 
-    # dnn_feature_columns = sparse_feature_columns + dense_feature_columns # For dense numerical features, we concatenate them to the input tensors of fully connected layer.
-    # linear_feature_columns = sparse_feature_columns + dense_feature_columns
-
+    debug(sparse_feature_columns=sparse_feature_columns, varlen_sparse_feature_columns=varlen_sparse_feature_columns, dense_feature_columns=dense_feature_columns)
+    all_feature_columns = sparse_feature_columns + varlen_sparse_feature_columns + dense_feature_columns 
     feature_names = get_feature_names(all_feature_columns) # record feature field name
     debug(feature_names=feature_names)
     return all_feature_columns, feature_names
@@ -147,9 +143,18 @@ def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0):
         test_data = data.iloc[-10:]
     debug(train_vote_num = len(train_data), test_vote_num = len(test_data))
     return train_data, test_data
-def convert_tokenize_model_input(train_data:pd.DataFrame, test_data:pd.DataFrame, feature_names, config):
-    train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
-    test_model_input = {name:test_data[name] for name in feature_names if name in test_data}
+
+def collect_users_votes_data(train_data:pd.DataFrame, train_model_input, test_model_input):
+    voted_users = defaultdict(set)
+    for row_i, row in tqdm(train_data.iterrows()):
+        voted_users[row["SUBMISSION_ID"] + "-" + row["VOTE"]].add(row["USERNAME"])
+    train_model_input["UPVOTED_USERS"] = train_data.apply(lambda row:list(voted_users[row["SUBMISSION_ID"] + "-upvote"] - {row["USERNAME"]}))
+    train_model_input["DOWNVOTED_USERS"] = train_data.apply(lambda row:list(voted_users[row["SUBMISSION_ID"] + "-downvote"] - {row["USERNAME"]}))
+    test_model_input["UPVOTED_USERS"] = train_data.apply(lambda row:list(voted_users[row["SUBMISSION_ID"] + "-upvote"] - {row["USERNAME"]}))
+    test_model_input["DOWNVOTED_USERS"] = train_data.apply(lambda row:list(voted_users[row["SUBMISSION_ID"] + "-downvote"] - {row["USERNAME"]}))
+    return train_model_input, test_model_input
+    
+def tokenize_submission_text(train_data:pd.DataFrame, test_data:pd.DataFrame, train_model_input, test_model_input, config):
     if "SUBMISSION_TEXT" in train_data.columns:
         train_submission_text = list(train_data["SUBMISSION_TEXT"])
         test_submission_text = list(test_data["SUBMISSION_TEXT"])
@@ -178,7 +183,10 @@ def get_model_input(config):
         all_feature_columns, feature_names = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)
         debug(featured_data=featured_data)
         train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"])
-        train_model_input, test_model_input = convert_tokenize_model_input(train_data, test_data, feature_names, config)
+        train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
+        test_model_input = {name:test_data[name] for name in feature_names if name in test_data}
+        train_model_input, test_model_input = collect_users_votes_data(train_data, train_model_input, test_model_input)
+        train_model_input, test_model_input = tokenize_submission_text(train_data, test_data, train_model_input, test_model_input, config)
         if config["save_and_load_prepared_data"]:
             with open(prepared_data_path, "wb") as f:
                 pickle.dump((all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data), f)
@@ -213,47 +221,3 @@ if __name__ == '__main__':
     config = get_config(CONFIG_PATH) # default config
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
     analyze_data(train_data, test_data, original_feature_map)
-
-
-"""
-#%% Import model
-data = pd.read_csv('data/criteo_sample.txt')
-
-sparse_features = ['C' + str(i) for i in range(1, 27)]
-dense_features = ['I' + str(i) for i in range(1, 14)]
-
-data[sparse_features] = data[sparse_features].fillna('-1', )
-data[dense_features] = data[dense_features].fillna(0, )
-debug(data)
-target = ['label']
-
-#%% Label Encoding: 
-# discrete feature: map the features to integer value from 0 ~ len(#unique) - 1
-for feat in sparse_features:
-    lbe = LabelEncoder()
-    data[feat] = lbe.fit_transform(data[feat])
-debug(sparse_feat = data[sparse_features])
-# dense numerical features -> [0,1]
-mms = MinMaxScaler(feature_range=(0,1))
-data[dense_features] = mms.fit_transform(data[dense_features])
-debug(dense_feat = data[dense_features])
-
-#%% Generate feature columns
-sparse_feature_columns = [SparseFeat(feat, vocabulary_size=data[feat].nunique(),embedding_dim=4) for i,feat in enumerate(sparse_features)] # count #unique features for each sparse field, transform sparse features into dense vectors by embedding techniques
-dense_feature_columns = [DenseFeat(feat, 1,) for feat in dense_features]
-debug(sparse_feature_columns=sparse_feature_columns, dense_feature_columns=dense_feature_columns)
-# fixlen_feature_columns = [SparseFeat(feat, vocabulary_size=data[feat].nunique(),embedding_dim=4) for i,feat in enumerate(sparse_features)] + [DenseFeat(feat, 1,) for feat in dense_features]
-
-dnn_feature_columns = sparse_feature_columns + dense_feature_columns # For dense numerical features, we concatenate them to the input tensors of fully connected layer.
-linear_feature_columns = sparse_feature_columns + dense_feature_columns
-
-feature_names = get_feature_names(linear_feature_columns + dnn_feature_columns) # record feature field name
-debug(feature_names=feature_names)
-
-#%% generate input data for model
-train, test = train_test_split(data, test_size=0.2, random_state=2018)
-train_model_input = {name:train[name] for name in feature_names}
-test_model_input = {name:test[name] for name in feature_names}
-debug(test_model_input=test_model_input)
-"""
-

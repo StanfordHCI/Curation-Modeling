@@ -234,7 +234,7 @@ if __name__ == "__main__":
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
     model = get_model(config, all_feature_columns)
     train_weights = get_normalization_weights(train_data, config)
-    history = train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2) # , callbacks=[ModelCheckpoint(config["save_model_path"])]
+    history = train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2)
     model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
     test_weights = get_normalization_weights(test_data, config)
     eval_all_test_data = evaluate_model(model, test_model_input, test_model_input["input_ids"], test_model_input["token_type_ids"] if "token_type_ids" in test_model_input else None, test_model_input["attention_mask"], test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'])
