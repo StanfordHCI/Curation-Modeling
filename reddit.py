@@ -138,8 +138,8 @@ def store_batch_submission_text_pmaw(submission_ids):
 def store_all_submission_text(submission_ids, batch_size = 10000, ret = "list"):
     submission_ids = list(submission_ids) # [id.split("_")[-1] for id in list(submission_ids)]
     # submission_id_text_map = {}
-    remain_ids = set()
-    for start_i in tqdm(range(0, len(submission_ids), batch_size)):
+    remain_ids = pickle.load(open("data/reddit/tmp_remain_ids.pt", "rb")) # set()
+    for start_i in tqdm(range(11360000, len(submission_ids), batch_size)):
         batch_remains = store_batch_submission_text_pmaw(submission_ids[start_i : start_i + batch_size])
         # submission_id_text_map.update(batch_map)
         remain_ids.update(batch_remains)
@@ -152,6 +152,8 @@ def store_all_submission_text(submission_ids, batch_size = 10000, ret = "list"):
     #     return [submission_id_text_map.get(id, "") for id in submission_ids]
     # elif ret == "dict":
     #     return submission_id_text_map
+    return
+    pickle.dump(remain_ids, open("data/reddit/tmp_remain_ids.pt", "wb"))
 def get_batch_submission_text(submission_ids):
     submission_id_text_map = {}
     existing_items = session.query(Submissions).filter(Submissions.id.in_(submission_ids)).all()
@@ -164,8 +166,6 @@ if __name__ == "__main__":
     store_all_submission_text(['kxi2w8','kxi2g1','kxhzrl','kxhyh6','kxhwh0', 'kxhv53','kxhm7b','kxhm3s','kxhg37','kxhak9'])
     vote_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t')
     debug("Read vote data!")
-    store_all_submission_text(vote_data['SUBMISSION_ID'][:500])
-    debug("500 data done!")
     store_all_submission_text(vote_data['SUBMISSION_ID'], ret = "dict")
 
 

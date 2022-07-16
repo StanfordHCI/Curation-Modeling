@@ -2,13 +2,14 @@
 device: 0 # -1 for using cpu, 0 for single gpu, [0,1,2,3] for multiple gpus
 num_epochs: 25
 batch_size: 8192
-learning_rate: 0.01
+learning_rate: 0.0001
 load_pretrained_model: False
 model_type: MLR
 use_language_model_encoder: False
 language_model_encoder_name: vinai/bertweet-base
+encoder_hidden_dim: 768
 # weight
-downvote_weight: 3.5
+downvote_weight: 1
 user_normalization: null # null for no normalization, equal for assigning user weight = 1/votes,
 # data processing
 save_and_load_prepared_data: True

@@ -1,6 +1,7 @@
 from collections import Counter, OrderedDict, defaultdict
 import random
 import warnings
+import numpy as np
 
 from tqdm import tqdm
 from model import get_tokenizer
@@ -10,7 +11,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
-from deepctr_torch.inputs import SparseFeat, DenseFeat, get_feature_names
+from deepctr_torch.inputs import SparseFeat, VarLenSparseFeat, DenseFeat, get_feature_names
 from superdebug import debug
 import os
 import pickle
@@ -40,10 +41,15 @@ def sample_load_dataset(sample_user_ratio = 1):
         user_votes[f'{row["USERNAME"]}-{row["VOTE"]}'].append(row)
     vote_data = []
     for username in tqdm(selected_usernames):
-        votes_data = user_votes[username]
-        upvote_num = len(user_votes[f'{username}-upvote'])
-        downvotes = random.sample(user_votes[f'{username}-downvote'], upvote_num)
-        vote_data.extend(user_votes[f'{username}-upvote'])
+        upvotes = user_votes[f'{username}-upvote']
+        downvotes = user_votes[f'{username}-downvote']
+        upvote_num = len(upvotes)
+        downvote_num = len(downvotes)
+        if downvote_num < upvote_num:
+            upvotes = random.sample(upvotes, downvote_num)
+        elif upvote_num < downvote_num:
+            downvotes = random.sample(downvotes, upvote_num)
+        vote_data.extend(upvotes)
         vote_data.extend(downvotes)
     vote_data = pd.DataFrame(vote_data)
 
@@ -63,25 +69,29 @@ def sample_load_dataset(sample_user_ratio = 1):
         assert vote == 'upvote' or vote == 'downvote', f'Vote {vote} is invalid'
     return all_data
 
-def get_selected_feature(use_lm = False):
-    sparse_features_embed_dims = OrderedDict([('USERNAME',512), ('SUBMISSION_ID',32), ('SUBREDDIT',8), ('AUTHOR',8), ('NSFW',4)]) # USERNAME is reader
-    if use_lm:
-        sparse_features_embed_dims['LM_ENCODING'] = 768
+def get_selected_feature(use_lm = False, encoder_hidden_dim = 768):
+    sparse_features_embed_dims = OrderedDict([('USERNAME',512), ('SUBREDDIT',32), ('AUTHOR',32)]) #, ('SUBMISSION_ID',64) USERNAME is reader
     sparse_features = list(sparse_features_embed_dims.keys())
-    dense_features = ['CREATED_TIME', '#_COMMENTS'] # , 'SCORE', 'UPVOTED_%' #! might should not use those
+    varlen_sparse_features_embed_dims = OrderedDict([('UPVOTED_USERS',512), ('DOWNVOTED_USERS',512)])
+    varlen_sparse_features = list(varlen_sparse_features_embed_dims.keys())
+    dense_features = ['CREATED_TIME', 'NSFW'] # , '#_COMMENTS', 'SCORE', 'UPVOTED_%' #! might should not use those
+    if use_lm:
+        for i in range(encoder_hidden_dim):
+            dense_features.append(f'LM_ENCODING_{i}')
     target = ['VOTE']
-    return sparse_features_embed_dims, sparse_features, dense_features, target
+    return sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target
 
-def clear_data(data, sparse_features, dense_features):
+def clean_data(data:pd.DataFrame, sparse_features, dense_features):
+    data["NSFW"] = data["NSFW"].map({"NSFW": 1, "":0, np.nan: 0, None: 0})
     sparse_features = [feat for feat in sparse_features if feat in data]
+    dense_features = [feat for feat in dense_features if feat in data]
     data[sparse_features] = data[sparse_features].fillna('n/a')
     data[dense_features] = data[dense_features].fillna(0)
-
     return data
 
-def transform_features(data, sparse_features, dense_features, target):
+def transform_features(data, sparse_features, varlen_sparse_features, dense_features, target):
     original_feature_map = defaultdict(dict)
-    for feature_name in sparse_features:
+    for feature_name in sparse_features + varlen_sparse_features:
         if feature_name in data:
             lbe = LabelEncoder()
             original_features = data[feature_name]
@@ -94,16 +104,18 @@ def transform_features(data, sparse_features, dense_features, target):
     data[target[0]] = lbe.fit_transform(data[target[0]])
     # dense numerical features -> [0,1]
     mms = MinMaxScaler(feature_range=(0,1))
+    dense_features = [feat for feat in dense_features if feat in data]
     data[dense_features] = mms.fit_transform(data[dense_features])
     debug(data=data)
     return data, original_feature_map
 
-def get_feature_columns(data, sparse_features, sparse_features_embed_dims, dense_features):
+def get_feature_columns(data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features):
     sparse_feature_columns = [SparseFeat(feat, vocabulary_size=(data[feat].nunique() if feat in data else 1),embedding_dim=sparse_features_embed_dims[feat]) for i,feat in enumerate(sparse_features)] # count #unique features for each sparse field, transform sparse features into dense vectors by embedding techniques
+    varlen_sparse_feature_columns = [VarLenSparseFeat(SparseFeat(feat, vocabulary_size=data["USERNAME"].nunique(), embedding_dim=varlen_sparse_features_embed_dims[feat]), maxlen=max_len, combiner='mean') for i,feat in enumerate(varlen_sparse_features)]  # TODO:
     dense_feature_columns = [DenseFeat(feat, 1,) for feat in dense_features]
     debug(sparse_feature_columns=sparse_feature_columns, dense_feature_columns=dense_feature_columns)
     # fixlen_feature_columns = [SparseFeat(feat, vocabulary_size=data[feat].nunique(),embedding_dim=4) for i,feat in enumerate(sparse_features)] + [DenseFeat(feat, 1,) for feat in dense_features]
-    all_feature_columns = dense_feature_columns + sparse_feature_columns 
+    all_feature_columns = sparse_feature_columns + dense_feature_columns 
     # dnn_feature_columns = sparse_feature_columns + dense_feature_columns # For dense numerical features, we concatenate them to the input tensors of fully connected layer.
     # linear_feature_columns = sparse_feature_columns + dense_feature_columns
 
@@ -159,11 +171,11 @@ def get_model_input(config):
     else:
         all_data = sample_load_dataset(config["sample_user_ratio"])
         if config["use_language_model_encoder"]:
-            all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'], config["submission_text_dict_path"])
-        sparse_features_embed_dims, sparse_features, dense_features, target = get_selected_feature(config["use_language_model_encoder"])
-        cleared_data = clear_data(all_data, sparse_features, dense_features)
-        featured_data, original_feature_map = transform_features(cleared_data, sparse_features, dense_features, target)
-        all_feature_columns, feature_names = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, dense_features)
+            all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
+        sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target = get_selected_feature(config["use_language_model_encoder"], config["encoder_hidden_dim"])
+        cleared_data = clean_data(all_data, sparse_features, dense_features)
+        featured_data, original_feature_map = transform_features(cleared_data, sparse_features, varlen_sparse_features, dense_features, target)
+        all_feature_columns, feature_names = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)
         debug(featured_data=featured_data)
         train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"])
         train_model_input, test_model_input = convert_tokenize_model_input(train_data, test_data, feature_names, config)
