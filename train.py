@@ -87,12 +87,6 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
     for i in range(len(x)):
         if len(x[i].shape) == 1:
             x[i] = np.expand_dims(x[i], axis=1)
-    # if model.lm_encoder is not None:
-    #     train_tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights),text_input_ids,text_token_type_ids,text_attention_mask)
-    # else:
-    #     train_tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights))
-
-    # if torch.isnan(train_tensor_data.tensors[0]).any(): raise ValueError('nan')
     train_tensor_data, train_loader = get_data_loader(model.lm_encoder is not None, x, text_input_ids,text_token_type_ids,text_attention_mask, y, weights, shuffle=shuffle, batch_size=batch_size)
 
     model = model.train()
@@ -107,8 +101,6 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
         batch_size *= len(model.gpus)  # input `batch_size` is batch_size per gpu
     else:
         _model = model
-
-    # train_loader = DataLoader(dataset=train_tensor_data, shuffle=shuffle, batch_size=batch_size)
 
     sample_num = len(train_tensor_data)
     steps_per_epoch = (sample_num - 1) // batch_size + 1
@@ -176,8 +168,7 @@ def convert_CTR_model_input(model, dataloader_input):
         (x, y, weight, text_input_ids, text_token_type_ids, text_attention_mask) = dataloader_input
         text_input_ids, text_token_type_ids, text_attention_mask = to_device(model.device, False, text_input_ids, text_token_type_ids, text_attention_mask)
         encoder_hidden = model.lm_encoder(input_ids = text_input_ids, token_type_ids = text_token_type_ids if text_token_type_ids.shape[-1] > 0 else None, attention_mask = text_attention_mask).last_hidden_state
-        encoder_hidden_pooled = encoder_hidden.sum(axis=1) / text_attention_mask.sum(axis = -1, keepdim = True)
-
+        encoder_hidden_pooled = (text_attention_mask[:,:,None] * encoder_hidden).sum(axis=1) / text_attention_mask.sum(axis = 1, keepdim = True)
     else:
         x, y, weight = dataloader_input
     x, y, weight = to_device(model.device, True, x, y, weight)
