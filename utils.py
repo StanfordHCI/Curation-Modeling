@@ -25,11 +25,26 @@ def get_config(config_path, suffix="_train"):
     if os.path.exists(log_path): os.remove(log_path)
     shutil.copy(config_path, log_path)
     if config["device"] != -1 and torch.cuda.is_available():
-        print('cuda ready...')
+        print('GPU ready...')
+        if config["device"] == -2:
+            import pynvml
+            pynvml.nvmlInit()
+            gpu_count = pynvml.nvmlDeviceGetCount()
+            min_used_mem = 999999999999999
+            config["device"] = 0
+            for i in range(gpu_count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                if mem_info.used < min_used_mem:
+                    min_used_mem = mem_info.used
+                    config["device"] = i
+            print(f'Smart using cuda:{config["device"]}')
         config["gpus"] = config["device"] if type(config["device"]) == list else [config["device"]]
         config["gpus"] = [f"cuda:{device}" for device in config["gpus"]]
         config["device"] = config["gpus"][0]
     else:
+        if torch.cuda.is_available():
+            print("GPU detected yet using CPU...")
         config["device"] = "cpu"
         config["gpus"] = None
     config["log_path"] = log_path
@@ -45,8 +60,13 @@ def join_sets(sets):
         full_set.update(a_set)
     return full_set
     
-
+def check_model(model):
+    if "UPVOTED_USERS" in model.embedding_dict:
+        assert model.embedding_dict["UPVOTED_USERS"] == model.embedding_dict["USERNAME"]
+    if "DOWNVOTED_USERS" in model.embedding_dict:
+        assert model.embedding_dict["DOWNVOTED_USERS"] == model.embedding_dict["USERNAME"]
 def save_model(model, epoch, eval_acc, optim, save_dir, type = "latest"):
+    check_model(model)
     save_path = os.path.join(save_dir, f"{type}.pt")
     save_dict = {'epoch': epoch, 
 		'state_dict': model.state_dict(), 
@@ -76,6 +96,7 @@ def load_model(save_dir, model, optim, initial_epoch, best_eval_acc, type = "lat
         optim.load_state_dict(save_dict['optimizer'])
         initial_epoch = save_dict['epoch']
         best_eval_acc = save_dict['eval_acc']
+    check_model(model)
     return model, optim, initial_epoch, best_eval_acc, save_dict
 
 def print_log(log_path, *strs, **strss):

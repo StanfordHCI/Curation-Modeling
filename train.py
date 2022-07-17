@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 from tensorflow.python.keras.callbacks import CallbackList
 from tqdm import tqdm
 import numpy as np
+from tensorflow.python.keras.preprocessing.sequence import pad_sequences
 
 def get_normalization_weights(data:pd.DataFrame, config):
     upvote_downvote_weights = np.array(1 * (data["VOTE"] == 1) + config["downvote_weight"] * (data["VOTE"] == 0))
@@ -60,9 +61,11 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
         text_input_ids = x["input_ids"]
         text_token_type_ids = x["token_type_ids"] if "token_type_ids" in x else None
         text_attention_mask = x["attention_mask"]
+    else:
+        text_input_ids, text_token_type_ids, text_attention_mask = None, None, None
+    x["UPVOTED_USERS"] = pad_sequences(x["UPVOTED_USERS"], maxlen=max_voted_users, padding='post')
+    x["DOWNVOTED_USERS"] = pad_sequences(x["DOWNVOTED_USERS"], maxlen=max_voted_users, padding='post')
     x = [x[feature] for feature in model.feature_index if feature in x] # turn into a list of numpy arrays
-    for i, _ in enumerate(x): 
-        if _.isnull().values.any(): raise ValueError(i)
     do_validation = False
     if validation_split and 0. < validation_split < 1.:
         do_validation = True
@@ -77,6 +80,8 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
             text_input_ids, val_text_input_ids = text_input_ids[:split_at], text_input_ids[split_at:]
             text_token_type_ids, val_text_token_type_ids = (text_token_type_ids[:split_at], text_token_type_ids[split_at:]) if text_token_type_ids is not None else (torch.zeros([text_input_ids.shape[0], 0], dtype = int), torch.zeros([val_text_input_ids.shape[0], 0], dtype = int))
             text_attention_mask, val_text_attention_mask = text_attention_mask[:split_at], text_attention_mask[split_at:]
+        else:
+            val_text_input_ids, val_text_token_type_ids, val_text_attention_mask = None, None, None
     else:
         val_x, val_y, val_weights, val_text_input_ids, val_text_token_type_ids, val_text_attention_mask = [], [], [], [], [], []
     for i in range(len(x)):
@@ -135,7 +140,8 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
                 for name, metric_func in model.metrics.items():
                     if name not in train_result:
                         train_result[name] = []
-                    train_result[name].append(apply_metric(metric_func, y.cpu().numpy(), y_pred.reshape(y.shape).cpu().data.numpy()))
+                    metric_result = apply_metric(metric_func, y.cpu().numpy(), y_pred.reshape(y.shape).cpu().data.numpy())
+                    train_result[name].append(metric_result)
 
 
         # Add epoch_logs
@@ -182,7 +188,7 @@ def convert_CTR_model_input(model, dataloader_input):
 def get_data_loader(has_lm_encoder, x, text_input_ids,text_token_type_ids,text_attention_mask, y, weights = None, shuffle=True, batch_size=256):
     if weights is None:
         weights = np.zeros(y.shape, dtype = float)
-    if text_token_type_ids is None:
+    if text_token_type_ids is None and text_input_ids is not None:
         text_token_type_ids = torch.zeros([text_input_ids.shape[0], 0], dtype = int)
     if has_lm_encoder:
         tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights),text_input_ids,text_token_type_ids,text_attention_mask)
@@ -196,7 +202,10 @@ def get_data_loader(has_lm_encoder, x, text_input_ids,text_token_type_ids,text_a
 def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256):
     model = model.eval()
     if isinstance(x, dict):
+        x["UPVOTED_USERS"] = pad_sequences(x["UPVOTED_USERS"], maxlen=max_voted_users, padding='post')
+        x["DOWNVOTED_USERS"] = pad_sequences(x["DOWNVOTED_USERS"], maxlen=max_voted_users, padding='post')
         x = [x[feature] for feature in model.feature_index if feature in x]
+    
     for i in range(len(x)):
         if len(x[i].shape) == 1:
             x[i] = np.expand_dims(x[i], axis=1)
@@ -231,8 +240,8 @@ def parse_config():
 
 if __name__ == "__main__":
     config = parse_config()
-    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
-    model = get_model(config, all_feature_columns)
+    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = get_model_input(config)
+    model = get_model(config, all_feature_columns, feature_names)
     train_weights = get_normalization_weights(train_data, config)
     history = train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2)
     model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")

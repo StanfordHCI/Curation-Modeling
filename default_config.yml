@@ -1,5 +1,5 @@
 ### train
-device: 0 # -1 for using cpu, 0 for single gpu, [0,1,2,3] for multiple gpus
+device: -2 # -1 for using cpu, 0 for single gpu, -2 for dynamically picking single gpu, [0,1,2,3] for multiple gpus
 num_epochs: 25
 batch_size: 8192
 learning_rate: 0.0001

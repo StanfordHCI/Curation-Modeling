@@ -25,9 +25,13 @@ def get_ctr_model(model_type):
     }
     return models[model_type]
 
-def get_model(config, all_feature_columns):
+def get_model(config, all_feature_columns, feature_names):
     CTRModel = get_ctr_model(config["model_type"])
     model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
+    if "UPVOTED_USERS" in feature_names:
+        model.embedding_dict["UPVOTED_USERS"] = model.embedding_dict["USERNAME"]
+    if "DOWNVOTED_USERS" in feature_names:
+        model.embedding_dict["DOWNVOTED_USERS"] = model.embedding_dict["USERNAME"]
     if config["use_language_model_encoder"]:
         model.lm_encoder = AutoModel.from_pretrained(config["language_model_encoder_name"])
         # tokenizer = get_tokenizer(config)

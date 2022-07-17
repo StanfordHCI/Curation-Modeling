@@ -13,13 +13,13 @@ from model import get_model
 from venn import venn, pseudovenn
 
 def get_best_model(config):
-    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
+    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = get_model_input(config)
     """
     CTRModel = get_ctr_model(config["model_type"])
     model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
     model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
     """
-    model = get_model(config, all_feature_columns)
+    model = get_model(config, all_feature_columns, feature_names)
     model, _, _, _, model_dict = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
     assert model_dict is not None, "No trained model"
     state_dict = model_dict["state_dict"]
@@ -230,7 +230,7 @@ def parse_config():
 
 if __name__ == "__main__":
     config = parse_config()
-    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, train_data, test_data = get_model_input(config)
+    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = get_model_input(config)
     model, user_embedding = get_best_model(config)
     debug(user_embedding=user_embedding)
     active_user_votes_thres = config["active_user_votes_thres"]

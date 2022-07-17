@@ -1,6 +1,6 @@
 sample_user_ratio: 0.01
 model_type: DCN
-prepared_data_path: data/reddit/prepared_small_text_data.pt
+prepared_data_path: data/reddit/prepared_med_text_data.pt
 user_normalization: null # equal
 downvote_weight: 1
 batch_size: 16

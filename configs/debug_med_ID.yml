@@ -1,0 +1,9 @@
+sample_user_ratio: 0.01
+model_type: DCN
+prepared_data_path: data/reddit/prepared_med_ID_data.pt
+user_normalization: null # equal
+downvote_weight: 1
+batch_size: 16
+single_user_as_cluster: True
+num_epochs: 1
+use_language_model_encoder: False
