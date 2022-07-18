@@ -156,10 +156,14 @@ def collect_users_votes_data(train_data:pd.DataFrame, test_data:pd.DataFrame, tr
     for row_i, row in tqdm(train_data.iterrows()):
         voted_users[f'{row["SUBMISSION_ID"]}-{row["VOTE"]}'].add(row["USERNAME"])
     train_model_input["UPVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)
+    train_data["UPVOTED_USERS"] = train_model_input["UPVOTED_USERS"]
     train_model_input["DOWNVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-0'] - {r["USERNAME"]}), axis=1)
+    train_data["DOWNVOTED_USERS"] = train_model_input["DOWNVOTED_USERS"]
     test_model_input["UPVOTED_USERS"] = test_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)
+    test_data["UPVOTED_USERS"] = test_model_input["UPVOTED_USERS"]
     test_model_input["DOWNVOTED_USERS"] = test_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-0'] - {r["USERNAME"]}), axis=1)
-    return train_model_input, test_model_input
+    test_data["DOWNVOTED_USERS"] = test_model_input["DOWNVOTED_USERS"]
+    return train_data, test_data, train_model_input, test_model_input
     
 def tokenize_submission_text(train_data:pd.DataFrame, test_data:pd.DataFrame, train_model_input, test_model_input, config):
     if "SUBMISSION_TEXT" in train_data.columns:
@@ -194,7 +198,7 @@ def get_model_input(config):
         train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
         test_model_input = {name:test_data[name] for name in feature_names if name in test_data}
         if config["use_voted_users_feature"]:
-            train_model_input, test_model_input = collect_users_votes_data(train_data, test_data, train_model_input, test_model_input)
+            train_data, test_data, train_model_input, test_model_input = collect_users_votes_data(train_data, test_data, train_model_input, test_model_input)
         train_model_input, test_model_input = tokenize_submission_text(train_data, test_data, train_model_input, test_model_input, config)
         if config["save_and_load_prepared_data"]:
             with open(prepared_data_path, "wb") as f:
@@ -211,13 +215,18 @@ def analyze_data(train_data, test_data, original_feature_map):
     subreddit_votes = defaultdict(Counter)
     for row_i, row in train_data.iterrows():
         subreddit_votes[row["SUBREDDIT"]][row["VOTE"]] += 1
+        if "users" not in subreddit_votes[row["SUBREDDIT"]]:
+            subreddit_votes[row["SUBREDDIT"]]["users"] = set()
+        subreddit_votes[row["SUBREDDIT"]]["users"].add(row["USERNAME"])
     for subreddit in subreddit_votes:
         subreddit_votes[subreddit]["downvote_rate"] = 100 * subreddit_votes[subreddit][0] / (subreddit_votes[subreddit][1] + subreddit_votes[subreddit][0])
         subreddit_votes[subreddit]["subreddit"] = original_feature_map["SUBREDDIT"][subreddit]
+        subreddit_votes[subreddit]["users"] = str(subreddit_votes[subreddit]["users"])
     subreddit_votes = pd.DataFrame(list(subreddit_votes.values())).set_index("subreddit")
     debug(subreddit_votes=subreddit_votes)
-    subreddit_votes.to_csv("output/subreddit_votes.csv")
-    debug("Votes of each subreddit is saved to output/subreddit_votes.csv")
+    save_path = "output/subreddit_votes_users.csv"
+    subreddit_votes.to_csv(save_path)
+    debug(f"Votes of each subreddit is saved to {save_path}")
     
     """
     import seaborn as sns
@@ -226,7 +235,7 @@ def analyze_data(train_data, test_data, original_feature_map):
     ax.figure.savefig("data/reddit/output.png")
     """
 if __name__ == '__main__':
-    CONFIG_PATH = "configs/debug.yml"
+    CONFIG_PATH = "configs/debug_small_LM.yml"
     config = get_config(CONFIG_PATH) # default config
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = get_model_input(config)
     debug(max_voted_users=max_voted_users)

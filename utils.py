@@ -72,12 +72,10 @@ def save_model(model, epoch, eval_acc, optim, save_dir, type = "latest"):
 		'state_dict': model.state_dict(), 
 		'eval_acc': eval_acc,
 		'optimizer': optim.state_dict()}
-    # if lm_encoder is not None:
-    #     save_dict['lm_encoder'] = lm_encoder.state_dict()
-    if "lm_encoder" in " ".join(list(model.state_dict().keys())):
-        debug("Model contains lm_encoder")
-    else:
-        debug("Model doesn't contain lm_encoder")
+    # if "lm_encoder" in " ".join(list(model.state_dict().keys())):
+    #     debug("Model contains lm_encoder")
+    # else:
+    #     debug("Model doesn't contain lm_encoder")
     torch.save(save_dict, save_path)
 
 def load_model_dict(save_dir, type = "latest"):

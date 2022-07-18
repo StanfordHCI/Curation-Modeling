@@ -177,7 +177,7 @@ def sample_updown_voted_users(x:torch.tensor, model, vote = "upvote", interactiv
             sampled_updown_voted_users = random.sample(list(updown_voted_users), sample_num)
         else:
             print(f"Original {vote}d users:", list(updown_voted_users))
-            selected_users = input(f"Please select {model.feature_index[f'{vote.upper()}D_USERS'][1] - model.feature_index[f'{vote.upper()}D_USERS'][0]} {vote}d users: ")
+            selected_users = input(f"Please select {model.feature_index[f'{vote.upper()}D_USERS'][1] - model.feature_index[f'{vote.upper()}D_USERS'][0]} {vote}d users (input '.' to stop): ")
             if selected_users == ".":
                 return None
             sampled_updown_voted_users = [int(user) for user in selected_users.split() if int(user) != 0]
@@ -219,7 +219,7 @@ def get_data_loader(has_lm_encoder, x, text_input_ids,text_token_type_ids,text_a
     data_loader = DataLoader(dataset=tensor_data, shuffle=shuffle, batch_size=batch_size)
     return tensor_data, data_loader
 
-def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256, sample_voted_users=False, max_voted_users=100):
+def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256, sample_voted_users=False, max_voted_users=100, return_prediction = False):
     model = model.eval()
     if isinstance(x, dict):
         if "UPVOTED_USERS" in x:
@@ -240,6 +240,9 @@ def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention
             pred_ans.append(y_pred)
 
     pred_ans =  np.concatenate(pred_ans).astype("float64")
+    if return_prediction:
+        return pred_ans
+
     eval_result = OrderedDict()
     for wei in [None, weights]:
         for name, metric_func in model.metrics.items():
@@ -268,12 +271,12 @@ if __name__ == "__main__":
     test_weights = get_normalization_weights(test_data, config)
     if config["use_voted_users_feature"]:
         debug("Use all voted users as feature")
-    eval_all_test_data = evaluate_model(model, test_model_input, test_model_input["input_ids"], test_model_input["token_type_ids"] if "token_type_ids" in test_model_input else None, test_model_input["attention_mask"], test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'], max_voted_users=max_voted_users,sample_voted_users=False)
+    eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'], max_voted_users=max_voted_users,sample_voted_users=False)
     debug(eval_all_test_data=eval_all_test_data)
 
     if config["use_voted_users_feature"] and config["sample_part_voted_users"]:
         debug("Sample part voted users as feature")
-        eval_all_test_data = evaluate_model(model, test_model_input, test_model_input["input_ids"], test_model_input["token_type_ids"] if "token_type_ids" in test_model_input else None, test_model_input["attention_mask"], test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'],max_voted_users=max_voted_users, sample_voted_users=True)
+        eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'],max_voted_users=max_voted_users, sample_voted_users=True)
         debug(eval_all_test_data=eval_all_test_data)
 
     with open(config["log_path"], 'a') as log:

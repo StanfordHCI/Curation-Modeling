@@ -23,9 +23,9 @@ submission_text_dict_path: data/reddit/submission_text_dict.pt
 
 ### curation modeling
 upvote_downvote_ratio_thres: 0.9
-single_user_as_cluster: False
-user_clustering_method: "neural" # or "votes"
+user_grouping_method: "neural" # or "votes", "single_user_as_group", "manual"
+manual_user_groups: null
 active_user_votes_thres: 5
-cluster_user_num_lower_thres: 5
-cluster_user_num_upper_thres: 500
+group_user_num_lower_thres: 5
+group_user_num_upper_thres: 500
 preferred_submissions_venn_figure_dir: output/figures/preferred_subs
