@@ -69,16 +69,19 @@ def sample_load_dataset(sample_user_ratio = 1):
         assert vote == 'upvote' or vote == 'downvote', f'Vote {vote} is invalid'
     return all_data
 
-def get_selected_feature(use_lm = False, encoder_hidden_dim = 768):
+def get_selected_feature(use_lm = False, encoder_hidden_dim = 768, use_voted_users_feature = True):
     dense_features = ['CREATED_TIME', 'NSFW'] # , '#_COMMENTS', 'SCORE', 'UPVOTED_%' #! do not use those
-    sparse_features_embed_dims = OrderedDict([('USERNAME',512), ('SUBREDDIT',32), ('AUTHOR',32)]) # USERNAME is reader
+    sparse_features_embed_dims = OrderedDict([('USERNAME',256), ('SUBREDDIT',32), ('AUTHOR',32)]) # USERNAME is reader
     if use_lm:
         for i in range(encoder_hidden_dim):
             dense_features.append(f'LM_ENCODING_{i}')
     else:
         sparse_features_embed_dims['SUBMISSION_ID'] = 256
     sparse_features = list(sparse_features_embed_dims.keys())
-    varlen_sparse_features_embed_dims = OrderedDict([('UPVOTED_USERS',512), ('DOWNVOTED_USERS',512)])
+    if use_voted_users_feature:
+        varlen_sparse_features_embed_dims = OrderedDict([('UPVOTED_USERS',256), ('DOWNVOTED_USERS',256)])
+    else:
+        varlen_sparse_features_embed_dims = OrderedDict([])
     varlen_sparse_features = list(varlen_sparse_features_embed_dims.keys())
 
     target = ['VOTE']
@@ -182,7 +185,7 @@ def get_model_input(config):
         all_data = sample_load_dataset(config["sample_user_ratio"])
         if config["use_language_model_encoder"]:
             all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
-        sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target = get_selected_feature(config["use_language_model_encoder"], config["encoder_hidden_dim"])
+        sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target = get_selected_feature(config["use_language_model_encoder"], config["encoder_hidden_dim"], config["use_voted_users_feature"])
         cleared_data = clean_data(all_data, sparse_features, dense_features)
         featured_data, original_feature_map = transform_features(cleared_data, sparse_features, varlen_sparse_features, dense_features, target)
         all_feature_columns, feature_names, max_voted_users = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)
@@ -190,7 +193,8 @@ def get_model_input(config):
         train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"])
         train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
         test_model_input = {name:test_data[name] for name in feature_names if name in test_data}
-        train_model_input, test_model_input = collect_users_votes_data(train_data, test_data, train_model_input, test_model_input)
+        if config["use_voted_users_feature"]:
+            train_model_input, test_model_input = collect_users_votes_data(train_data, test_data, train_model_input, test_model_input)
         train_model_input, test_model_input = tokenize_submission_text(train_data, test_data, train_model_input, test_model_input, config)
         if config["save_and_load_prepared_data"]:
             with open(prepared_data_path, "wb") as f:

@@ -1,5 +1,5 @@
 import argparse
-from collections import Counter
+from collections import Counter, OrderedDict
 import datetime
 import os
 import time
@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 from tensorflow.python.keras.callbacks import CallbackList
 from tqdm import tqdm
 import numpy as np
+import random
 from tensorflow.python.keras.preprocessing.sequence import pad_sequences
 
 def get_normalization_weights(data:pd.DataFrame, config):
@@ -63,8 +64,9 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
         text_attention_mask = x["attention_mask"]
     else:
         text_input_ids, text_token_type_ids, text_attention_mask = None, None, None
-    x["UPVOTED_USERS"] = pad_sequences(x["UPVOTED_USERS"], maxlen=max_voted_users, padding='post')
-    x["DOWNVOTED_USERS"] = pad_sequences(x["DOWNVOTED_USERS"], maxlen=max_voted_users, padding='post')
+    if "UPVOTED_USERS" in x:
+        x["UPVOTED_USERS"] = pad_sequences(x["UPVOTED_USERS"], maxlen=max_voted_users, padding='post')
+        x["DOWNVOTED_USERS"] = pad_sequences(x["DOWNVOTED_USERS"], maxlen=max_voted_users, padding='post')
     x = [x[feature] for feature in model.feature_index if feature in x] # turn into a list of numpy arrays
     do_validation = False
     if validation_split and 0. < validation_split < 1.:
@@ -114,7 +116,7 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
         total_loss_epoch = 0
         train_result = {}
         for _, train_input in tqdm(enumerate(train_loader), total = steps_per_epoch, desc = "Training"):
-            x, y, weight = convert_CTR_model_input(model, train_input)
+            x, y, weight = convert_CTR_model_input(model, train_input, sample_voted_users=config["sample_part_voted_users"])
             y_pred = _model(x)
 
             optim.zero_grad()
@@ -163,7 +165,7 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
         if best_eval_acc == eval_result["acc"]:
             save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"], "best")
 
-def convert_CTR_model_input(model, dataloader_input):
+def convert_CTR_model_input(model, dataloader_input, sample_voted_users = False):
     if model.lm_encoder is not None:
         (x, y, weight, text_input_ids, text_token_type_ids, text_attention_mask) = dataloader_input
         text_input_ids, text_token_type_ids, text_attention_mask = to_device(model.device, False, text_input_ids, text_token_type_ids, text_attention_mask)
@@ -171,6 +173,32 @@ def convert_CTR_model_input(model, dataloader_input):
         encoder_hidden_pooled = (text_attention_mask[:,:,None] * encoder_hidden).sum(axis=1) / text_attention_mask.sum(axis = 1, keepdim = True)
     else:
         x, y, weight = dataloader_input
+    if sample_voted_users:
+        if "UPVOTED_USERS" in model.feature_index:
+            upvoted_users_batch_orig = x[:,model.feature_index["UPVOTED_USERS"][0]:model.feature_index["UPVOTED_USERS"][1]]
+            upvoted_users_batch = upvoted_users_batch_orig.new_zeros(upvoted_users_batch_orig.shape)
+            for batch_i in range(len(upvoted_users_batch_orig)):
+                upvoted_users = set(tuple(upvoted_users_batch_orig[batch_i].cpu().numpy()))
+                if 0 in upvoted_users:
+                    upvoted_users.remove(0)
+                sample_num = random.randint(0, len(upvoted_users))
+                sampled_upvoted_users = random.sample(list(upvoted_users), sample_num)
+                sampled_upvoted_users = torch.tensor(sampled_upvoted_users)
+                upvoted_users_batch[batch_i, :len(sampled_upvoted_users)] = sampled_upvoted_users
+            x[:, model.feature_index["UPVOTED_USERS"][0]:model.feature_index["UPVOTED_USERS"][1]] = upvoted_users_batch
+
+            downvoted_users_batch_orig = x[:, model.feature_index["DOWNVOTED_USERS"][0]:model.feature_index["DOWNVOTED_USERS"][1]]
+            downvoted_users_batch = downvoted_users_batch_orig.new_zeros(downvoted_users_batch_orig.shape)
+            for batch_i in range(len(downvoted_users_batch_orig)):
+                downvoted_users = set(tuple(downvoted_users_batch_orig[batch_i].cpu().numpy()))
+                if 0 in downvoted_users:
+                    downvoted_users.remove(0)
+                sample_num = random.randint(0, len(downvoted_users))
+                sampled_downvoted_users = random.sample(list(downvoted_users), sample_num)
+                sampled_downvoted_users = torch.tensor(sampled_downvoted_users)
+                downvoted_users_batch[batch_i, :len(sampled_downvoted_users)] = sampled_downvoted_users
+            x[:, model.feature_index["DOWNVOTED_USERS"][0]:model.feature_index["DOWNVOTED_USERS"][1]] = downvoted_users_batch
+
     x, y, weight = to_device(model.device, True, x, y, weight)
     if model.lm_encoder is not None:
         x = torch.cat([x, encoder_hidden_pooled], dim = -1)
@@ -190,11 +218,12 @@ def get_data_loader(has_lm_encoder, x, text_input_ids,text_token_type_ids,text_a
     data_loader = DataLoader(dataset=tensor_data, shuffle=shuffle, batch_size=batch_size)
     return tensor_data, data_loader
 
-def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256):
+def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256, sample_voted_users=False):
     model = model.eval()
     if isinstance(x, dict):
-        x["UPVOTED_USERS"] = pad_sequences(x["UPVOTED_USERS"], maxlen=max_voted_users, padding='post')
-        x["DOWNVOTED_USERS"] = pad_sequences(x["DOWNVOTED_USERS"], maxlen=max_voted_users, padding='post')
+        if "UPVOTED_USERS" in x:
+            x["UPVOTED_USERS"] = pad_sequences(x["UPVOTED_USERS"], maxlen=max_voted_users, padding='post')
+            x["DOWNVOTED_USERS"] = pad_sequences(x["DOWNVOTED_USERS"], maxlen=max_voted_users, padding='post')
         x = [x[feature] for feature in model.feature_index if feature in x]
     
     for i in range(len(x)):
@@ -205,12 +234,12 @@ def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention
     pred_ans = []
     with torch.no_grad():
         for _, test_input in enumerate(test_loader):
-            x, _y, weight = convert_CTR_model_input(model, test_input)
+            x, _y, weight = convert_CTR_model_input(model, test_input, sample_voted_users=sample_voted_users) # TODO
             y_pred = model(x).cpu().data.numpy()  # .squeeze()
             pred_ans.append(y_pred)
 
     pred_ans =  np.concatenate(pred_ans).astype("float64")
-    eval_result = {}
+    eval_result = OrderedDict()
     for wei in [None, weights]:
         for name, metric_func in model.metrics.items():
             eval_result[f"{name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y, pred_ans, sample_weight=wei)
@@ -237,7 +266,15 @@ if __name__ == "__main__":
     history = train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2)
     model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
     test_weights = get_normalization_weights(test_data, config)
-    eval_all_test_data = evaluate_model(model, test_model_input, test_model_input["input_ids"], test_model_input["token_type_ids"] if "token_type_ids" in test_model_input else None, test_model_input["attention_mask"], test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'])
+    if config["use_voted_users_feature"]:
+        debug("Use all voted users as feature")
+    eval_all_test_data = evaluate_model(model, test_model_input, test_model_input["input_ids"], test_model_input["token_type_ids"] if "token_type_ids" in test_model_input else None, test_model_input["attention_mask"], test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=False)
     debug(eval_all_test_data=eval_all_test_data)
+
+    if config["use_voted_users_feature"] and config["sample_part_voted_users"]:
+        debug("Sample part voted users as feature")
+        eval_all_test_data = evaluate_model(model, test_model_input, test_model_input["input_ids"], test_model_input["token_type_ids"] if "token_type_ids" in test_model_input else None, test_model_input["attention_mask"], test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=True)
+        debug(eval_all_test_data=eval_all_test_data)
+
     with open(config["log_path"], 'a') as log:
         log.write("eval_all_test_data:" + str(eval_all_test_data)+"\n")

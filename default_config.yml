@@ -14,6 +14,8 @@ user_normalization: null # null for no normalization, equal for assigning user w
 # data processing
 save_and_load_prepared_data: True
 sample_user_ratio: 1
+use_voted_users_feature: True
+sample_part_voted_users: True
 prepared_data_path: data/reddit/prepared_data.pt
 train_at_least_n_votes: 0
 submission_text_dict_path: data/reddit/submission_text_dict.pt
