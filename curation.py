@@ -9,25 +9,10 @@ from superdebug import debug
 import torch
 from data import get_model_input
 from utils import get_config, join_sets, load_model, print_log, save_model, load_model_dict
-from model import get_model
+from model import get_best_model
 from venn import venn, pseudovenn
 
-def get_best_model(config):
-    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = get_model_input(config)
-    """
-    CTRModel = get_ctr_model(config["model_type"])
-    model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
-    model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
-    """
-    model = get_model(config, all_feature_columns, feature_names)
-    model, _, _, _, model_dict = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
-    assert model_dict is not None, "No trained model"
-    state_dict = model_dict["state_dict"]
-    if config["model_type"] == "MLR":
-        user_embedding = torch.cat([state_dict[f"region_linear_model.{i}.embedding_dict.USERNAME.weight"] for i in range(20) if f"region_linear_model.{i}.embedding_dict.USERNAME.weight" in state_dict], dim = -1)
-    else:
-        user_embedding = state_dict[f"embedding_dict.USERNAME.weight"] #[num_users, user_embed_dim]
-    return model, user_embedding.cpu()
+
 
 def get_popular_subreddits(train_data, test_data, user_votes_thres = 0):
     subreddit_votes_counter = Counter()
@@ -231,7 +216,7 @@ def parse_config():
 if __name__ == "__main__":
     config = parse_config()
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = get_model_input(config)
-    model, user_embedding = get_best_model(config)
+    model, user_embedding = get_best_model(config, all_feature_columns, feature_names)
     debug(user_embedding=user_embedding)
     active_user_votes_thres = config["active_user_votes_thres"]
     subreddit_votes_counter, subreddit_active_users, subreddit_train_submissions, subreddit_test_submissions = get_popular_subreddits(train_data, test_data, user_votes_thres = active_user_votes_thres) # subreddit_votes_counter, subreddit_users, subreddit_train_submissions are based on train_data, subreddit_test_submissions are based on test_data

@@ -70,7 +70,7 @@ def sample_load_dataset(sample_user_ratio = 1):
     return all_data
 
 def get_selected_feature(use_lm = False, encoder_hidden_dim = 768, use_voted_users_feature = True):
-    dense_features = ['CREATED_TIME', 'NSFW'] # , '#_COMMENTS', 'SCORE', 'UPVOTED_%' #! do not use those
+    dense_features = ['CREATED_TIME', 'NSFW'] # '#_COMMENTS', 'SCORE', 'UPVOTED_%' #! do not use those
     sparse_features_embed_dims = OrderedDict([('USERNAME',256), ('SUBREDDIT',32), ('AUTHOR',32)]) # USERNAME is reader
     if use_lm:
         for i in range(encoder_hidden_dim):

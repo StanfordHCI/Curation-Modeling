@@ -17,15 +17,6 @@ engine = create_engine(f"sqlite:///{submission_text_path}")
 DBSession = sessionmaker(bind=engine)
 session = DBSession()
 
-pmaw_api = PushshiftAPI()
-reddit = praw.Reddit(
-    client_id="kmyK_5R42klZo-WpcwX1xA",
-    client_secret="L7Wj40LXF7d8StPvESo9vpzxo3wAzw",
-    password="Azvrdtlibera4",
-    user_agent="testscript by u/Azure-Vision",
-    username="Azure-Vision",
-)
-print(reddit.user.me())
 Base = declarative_base()
 class Submissions(Base):
     __tablename__ = 'submissions'
@@ -162,6 +153,15 @@ def get_batch_submission_text(submission_ids):
     return [submission_id_text_map.get(id, "") for id in submission_ids]
 
 if __name__ == "__main__":
+    pmaw_api = PushshiftAPI()
+    reddit = praw.Reddit(
+        client_id="kmyK_5R42klZo-WpcwX1xA",
+        client_secret="L7Wj40LXF7d8StPvESo9vpzxo3wAzw",
+        password="Azvrdtlibera4",
+        user_agent="testscript by u/Azure-Vision",
+        username="Azure-Vision",
+    )
+    print(reddit.user.me())
     vote_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t')
     debug("Read vote data!")
     store_all_submission_text(vote_data['SUBMISSION_ID'], ret = "dict")

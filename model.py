@@ -1,5 +1,6 @@
 import torch
 from transformers import AutoModel, AutoTokenizer
+from utils import load_model
 
 def get_ctr_model(model_type):
     import deepctr_torch.models
@@ -40,6 +41,22 @@ def get_model(config, all_feature_columns, feature_names):
         model.lm_encoder = None
     model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
     return model
+
+def get_best_model(config, all_feature_columns, feature_names):
+    """
+    CTRModel = get_ctr_model(config["model_type"])
+    model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
+    model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
+    """
+    model = get_model(config, all_feature_columns, feature_names)
+    model, _, _, _, model_dict = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
+    assert model_dict is not None, "No trained model"
+    state_dict = model_dict["state_dict"]
+    if config["model_type"] == "MLR":
+        user_embedding = torch.cat([state_dict[f"region_linear_model.{i}.embedding_dict.USERNAME.weight"] for i in range(20) if f"region_linear_model.{i}.embedding_dict.USERNAME.weight" in state_dict], dim = -1)
+    else:
+        user_embedding = state_dict[f"embedding_dict.USERNAME.weight"] #[num_users, user_embed_dim]
+    return model, user_embedding.cpu()
 
 def get_tokenizer(config):
     tokenizer = AutoTokenizer.from_pretrained(config["language_model_encoder_name"], use_fast=False)
