@@ -10,7 +10,7 @@ from superdebug import debug
 from sklearn.metrics import log_loss, roc_auc_score, accuracy_score
 from data import get_model_input
 from model import get_model
-from utils import get_config, load_model, save_model, to_device
+from utils import get_config, load_model, save_model, to_device, parse_config
 from deepctr_torch.callbacks import ModelCheckpoint
 from deepctr_torch.layers.utils import slice_arrays
 from deepctr_torch.models.basemodel import BaseModel
@@ -253,13 +253,6 @@ def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention
     model = model.train()
     return eval_result
 
-
-def parse_config():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("config", type=str, help="Path to custom config file.")
-    args = parser.parse_args()
-    config = get_config(args.config)
-    return args.config, config
 
 if __name__ == "__main__":
     config_path, config = parse_config()

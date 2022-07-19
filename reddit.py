@@ -148,9 +148,10 @@ def store_all_submission_text(submission_ids, batch_size = 10000, ret = "list"):
     pickle.dump(remain_ids, open("data/reddit/tmp_remain_ids.pt", "wb"))
 def get_batch_submission_text(submission_ids):
     submission_id_text_map = {}
-    existing_items = session.query(Submissions).filter(Submissions.id.in_(submission_ids)).all()
-    for item in existing_items:
-        submission_id_text_map[item.id] = item.text
+    for start_i in range(0, len(submission_ids), 10000):
+        existing_items = session.query(Submissions).filter(Submissions.id.in_(submission_ids[start_i:start_i + 10000])).all()
+        for item in existing_items:
+            submission_id_text_map[item.id] = item.text
     return [submission_id_text_map.get(id, "") for id in submission_ids]
 
 if __name__ == "__main__":

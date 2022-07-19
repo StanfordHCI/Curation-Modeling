@@ -13,7 +13,8 @@ downvote_weight: 1
 user_normalization: equal # null for no normalization, equal for assigning user weight = 1/votes,
 # data processing
 save_and_load_prepared_data: True
-sample_user_ratio: 1
+sample_ratio: 1
+sample_column: 'USERNAME'
 use_voted_users_feature: True
 sample_part_voted_users: True
 prepared_data_path: data/reddit/prepared_data.pt

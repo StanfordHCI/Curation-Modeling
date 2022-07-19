@@ -1,3 +1,4 @@
+import argparse
 from collections import Counter, OrderedDict, defaultdict
 import random
 import warnings
@@ -16,43 +17,43 @@ from deepctr_torch.inputs import SparseFeat, VarLenSparseFeat, DenseFeat, get_fe
 from superdebug import debug
 import os
 import pickle
-import seaborn as sns
-from utils import get_config
-def sample_load_dataset(sample_user_ratio = 1):
+from utils import get_config, parse_config
+def sample_load_dataset(sample_ratio = 1, sample_column = 'USERNAME'):
     vote_data = pd.read_csv('data/reddit/44_million_votes.txt', sep = '\t')
     # SUBMISSION_ID SUBREDDIT    CREATED_TIME    USERNAME    VOTE
     # t3_e0i7l4	r/nagatoro		TeddehBear	upvote
     vote_data['SUBMISSION_ID'] = vote_data['SUBMISSION_ID'].astype(str)
     debug(vote_data_num = len(vote_data))
 
-    # sample x% of the users, include all the voting data involving these users
-    all_usernames = set(vote_data['USERNAME'])
-    if sample_user_ratio < 1:
+    # sample x% of the users/submissions, include all the voting data involving these users/submissions
+    all_usernames = set(vote_data[sample_column])
+    if sample_ratio < 1:
         random.seed(42)
-        selected_usernames = set(random.sample(list(all_usernames), k = int(sample_user_ratio * len(all_usernames))))
-        vote_data = vote_data[vote_data['USERNAME'].isin(selected_usernames)] 
+        selected_usernames = set(random.sample(list(all_usernames), k = int(sample_ratio * len(all_usernames))))
+        vote_data = vote_data[vote_data[sample_column].isin(selected_usernames)] 
         debug(vote_data_num = len(vote_data))
     else:
         selected_usernames = all_usernames
 
     # For each user, sample upvote:downvote = 1:1
-    random.seed(42)
-    user_votes = defaultdict(list)
-    for row_i, row in tqdm(vote_data.iterrows()):
-        user_votes[f'{row["USERNAME"]}-{row["VOTE"]}'].append(row)
-    vote_data = []
-    for username in tqdm(selected_usernames):
-        upvotes = user_votes[f'{username}-upvote']
-        downvotes = user_votes[f'{username}-downvote']
-        upvote_num = len(upvotes)
-        downvote_num = len(downvotes)
-        if downvote_num < upvote_num:
-            upvotes = random.sample(upvotes, downvote_num)
-        elif upvote_num < downvote_num:
-            downvotes = random.sample(downvotes, upvote_num)
-        vote_data.extend(upvotes)
-        vote_data.extend(downvotes)
-    vote_data = pd.DataFrame(vote_data)
+    if sample_column == 'USERNAME':
+        random.seed(42)
+        user_votes = defaultdict(list)
+        for row_i, row in tqdm(vote_data.iterrows()):
+            user_votes[f'{row["USERNAME"]}-{row["VOTE"]}'].append(row)
+        vote_data = []
+        for username in tqdm(selected_usernames):
+            upvotes = user_votes[f'{username}-upvote']
+            downvotes = user_votes[f'{username}-downvote']
+            upvote_num = len(upvotes)
+            downvote_num = len(downvotes)
+            if downvote_num < upvote_num:
+                upvotes = random.sample(upvotes, downvote_num)
+            elif upvote_num < downvote_num:
+                downvotes = random.sample(downvotes, upvote_num)
+            vote_data.extend(upvotes)
+            vote_data.extend(downvotes)
+        vote_data = pd.DataFrame(vote_data)
 
 
     submission_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t') # each submission is a separate post and have a forest of comments
@@ -179,7 +180,7 @@ def tokenize_submission_text(train_data:pd.DataFrame, test_data:pd.DataFrame, tr
 
 def get_model_input(config):
     prepared_data_path = config["prepared_data_path"]
-    if config["sample_user_ratio"] == 1:
+    if config["sample_ratio"] == 1:
         assert "small" not in config["prepared_data_path"]
     if config["save_and_load_prepared_data"] and os.path.exists(prepared_data_path):
         debug("Loading prepared data...")
@@ -187,7 +188,7 @@ def get_model_input(config):
             all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = pickle.load(f)
     else:
         debug("Preparing data...")
-        all_data = sample_load_dataset(config["sample_user_ratio"])
+        all_data = sample_load_dataset(config["sample_ratio"], config["sample_column"])
         if config["use_language_model_encoder"]:
             all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
         sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target = get_selected_feature(config["use_language_model_encoder"], config["encoder_hidden_dim"], config["use_voted_users_feature"])
@@ -207,60 +208,3 @@ def get_model_input(config):
             debug(f"Prepared data saved to {prepared_data_path}")
     return all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data
 
-def draw_histogram(counter:Counter, file_name):
-    df_dict = {"#votes=n": [], "count": []}
-    counter = OrderedDict(sorted(list(counter.items()), key = lambda x:x[0]))
-    for item in counter.items():
-        df_dict["#votes=n"].append(item[0])
-        df_dict["count"].append(item[1])
-    df = pd.DataFrame(df_dict)
-    sns.set_theme(style="whitegrid")
-    ax = sns.barplot(x="#votes=n", y="count", data=df)
-    ax.text(-0.15, 1.1, counter, fontsize=7, transform=ax.transAxes)
-    save_path = f"output/{file_name}.png"
-    plt.savefig(save_path, dpi = 300)
-    plt.close()
-    debug(f"Figure saved in {save_path}")
-
-def analyze_data(train_data, test_data, original_feature_map):
-    debug(train_upvote = sum(train_data["VOTE"] == 1),
-        train_downvote = sum(train_data["VOTE"] == 0),
-        test_upvote = sum(test_data["VOTE"] == 1),
-        test_downvote = sum(test_data["VOTE"] == 0),
-        )
-    user_votes = Counter()
-    submission_votes = Counter()
-    subreddit_subreddit_votes = defaultdict(Counter)
-    for row_i, row in train_data.iterrows():
-        submission_votes[row["SUBMISSION_ID"]] += 1
-        user_votes[row["USERNAME"]] += 1
-        subreddit_subreddit_votes[row["SUBREDDIT"]][row["VOTE"]] += 1
-        if "users" not in subreddit_subreddit_votes[row["SUBREDDIT"]]:
-            subreddit_subreddit_votes[row["SUBREDDIT"]]["users"] = set()
-        subreddit_subreddit_votes[row["SUBREDDIT"]]["users"].add(row["USERNAME"])
-    draw_histogram(Counter(user_votes.values()), "user_votes_distribution")
-    draw_histogram(Counter(submission_votes.values()), "submission_votes_distribution")
-
-    for subreddit in subreddit_subreddit_votes:
-        subreddit_subreddit_votes[subreddit]["downvote_rate"] = 100 * subreddit_subreddit_votes[subreddit][0] / (subreddit_subreddit_votes[subreddit][1] + subreddit_subreddit_votes[subreddit][0])
-        subreddit_subreddit_votes[subreddit]["subreddit"] = original_feature_map["SUBREDDIT"][subreddit]
-        subreddit_subreddit_votes[subreddit]["users"] = str(subreddit_subreddit_votes[subreddit]["users"])
-    subreddit_subreddit_votes = pd.DataFrame(list(subreddit_subreddit_votes.values())).set_index("subreddit")
-    debug(subreddit_votes=subreddit_subreddit_votes)
-    save_path = "output/subreddit_votes_users.csv"
-    subreddit_subreddit_votes.to_csv(save_path)
-    debug(f"Votes of each subreddit is saved to {save_path}")
-    
-    """
-    import seaborn as sns
-    sns.set_theme(style="whitegrid")
-    ax = sns.barplot(x="day", y="total_bill", data=tips)
-    ax.figure.savefig("data/reddit/output.png")
-    """
-if __name__ == '__main__':
-    CONFIG_PATH = "configs/debug_full_LM.yml"
-    config = get_config(CONFIG_PATH) # default config
-    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = get_model_input(config)
-    debug(max_voted_users=max_voted_users)
-    analyze_data(train_data, test_data, original_feature_map)
-    debug(CONFIG_PATH=CONFIG_PATH)

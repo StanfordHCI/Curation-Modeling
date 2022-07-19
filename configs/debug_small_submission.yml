@@ -1,8 +1,9 @@
-sample_ratio: 0.01
+sample_ratio: 0.002
 model_type: DCN
-prepared_data_path: data/reddit/prepared_med_ID_data.pt
+prepared_data_path: data/reddit/prepared_small_submission_data.pt
 downvote_weight: 1
 batch_size: 64
 user_grouping_method: single_user_as_group
 num_epochs: 5
 use_language_model_encoder: False
+sample_column: "SUBMISSION_ID"

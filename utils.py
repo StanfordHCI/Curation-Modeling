@@ -1,3 +1,4 @@
+import argparse
 import datetime
 import os
 import shutil
@@ -54,6 +55,13 @@ def get_config(config_path, suffix="_train"):
     
     return config
     
+def parse_config():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", type=str, help="Path to custom config file.")
+    args = parser.parse_args()
+    config = get_config(args.config)
+    return args.config, config
+
 def join_sets(sets):
     full_set = set()
     for a_set in sets:
