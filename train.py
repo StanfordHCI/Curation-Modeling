@@ -234,7 +234,7 @@ def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention
     tensor_data, test_loader = get_data_loader(model.lm_encoder is not None, x, text_input_ids,text_token_type_ids,text_attention_mask, y, weights, shuffle=False, batch_size=batch_size)
     pred_ans = []
     with torch.no_grad():
-        for _, test_input in enumerate(test_loader):
+        for _, test_input in enumerate(tqdm(test_loader)):
             x, _y, weight = convert_CTR_model_input(model, test_input, sample_voted_users=sample_voted_users)
             y_pred = model(x).cpu().data.numpy()  # .squeeze()
             pred_ans.append(y_pred)

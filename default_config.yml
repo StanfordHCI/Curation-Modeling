@@ -10,7 +10,7 @@ language_model_encoder_name: roberta-base
 encoder_hidden_dim: 768
 # weight
 downvote_weight: 1
-user_normalization: null # null for no normalization, equal for assigning user weight = 1/votes,
+user_normalization: equal # null for no normalization, equal for assigning user weight = 1/votes,
 # data processing
 save_and_load_prepared_data: True
 sample_user_ratio: 1

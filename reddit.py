@@ -105,6 +105,7 @@ def store_batch_submission_text_praw(submission_ids):
     for i in range(len(submission_ids)):
         # submission_id_text_map[submission_ids[i]] = submission_texts[i]
         session.add(Submissions(id=submission_ids[i], text=submission_texts[i]))
+    session.commit()
     # return submission_id_text_map
 
 def store_batch_submission_text_pmaw(submission_ids):
