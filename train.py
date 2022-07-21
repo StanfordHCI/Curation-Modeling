@@ -219,7 +219,7 @@ def get_data_loader(has_lm_encoder, x, text_input_ids,text_token_type_ids,text_a
     data_loader = DataLoader(dataset=tensor_data, shuffle=shuffle, batch_size=batch_size)
     return tensor_data, data_loader
 
-def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256, sample_voted_users=False, max_voted_users=100, return_prediction = False):
+def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256, sample_voted_users=False, max_voted_users=100, return_prediction = False, data_info = None):
     model = model.eval()
     if isinstance(x, dict):
         if "UPVOTED_USERS" in x:
@@ -243,20 +243,27 @@ def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention
     if return_prediction:
         return pred_ans
 
+    if data_info is not None:
+        test_filter = {"": (y >=-1).squeeze(), "_train_user_votes_num>=3": data_info["train_user_votes_num"] >= 3, "_train_submission_votes_num>=3": data_info["train_submission_votes_num"] >= 3, "_train_user_votes_num<=3": data_info["train_user_votes_num"] <= 3, "_train_submission_votes_num<=3": data_info["train_submission_votes_num"] <= 3} 
+    else:
+        test_filter = {"": (y >=-1).squeeze()}
     eval_result = OrderedDict()
     for wei in [None, weights]:
-        for name, metric_func in model.metrics.items():
-            eval_result[f"{name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y, pred_ans, sample_weight=wei)
-            if data is not None:
-                for vote in [0, 1]:
-                    eval_result[f"{name}_vote_{vote}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[data["VOTE"] == vote], pred_ans[data["VOTE"] == vote], sample_weight=wei[data["VOTE"] == vote] if wei is not None else None)
+        for filter_name in test_filter:
+            filter = test_filter[filter_name]
+            eval_result[f"{filter_name}{'_with_weight' if wei is not None else ''}"] = 0
+            for name, metric_func in model.metrics.items():
+                eval_result[f"{name}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[filter], pred_ans[filter], sample_weight=wei[filter] if wei is not None else None)
+                if data is not None:
+                    for vote in [0, 1]:
+                        eval_result[f"{name}_vote_{vote}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[(data["VOTE"] == vote).to_numpy() * filter], pred_ans[(data["VOTE"] == vote).to_numpy() * filter], sample_weight=wei[(data["VOTE"] == vote).to_numpy() * filter] if wei is not None else None)
     model = model.train()
     return eval_result
 
 
 if __name__ == "__main__":
     config_path, config = parse_config()
-    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = get_model_input(config)
+    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info = get_model_input(config)
     model = get_model(config, all_feature_columns, feature_names)
     train_weights = get_normalization_weights(train_data, config)
     history = train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2, max_voted_users=max_voted_users)
@@ -264,14 +271,14 @@ if __name__ == "__main__":
     test_weights = get_normalization_weights(test_data, config)
     if config["use_voted_users_feature"]:
         debug("Use all voted users as feature")
-    eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'], max_voted_users=max_voted_users,sample_voted_users=False)
+    eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'], max_voted_users=max_voted_users,sample_voted_users=False, data_info = test_data_info)
     debug(eval_all_test_data=eval_all_test_data)
 
     if config["use_voted_users_feature"] and config["sample_part_voted_users"]:
         debug("Sample part voted users as feature")
-        eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'],max_voted_users=max_voted_users, sample_voted_users=True)
+        eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'],max_voted_users=max_voted_users, sample_voted_users=True, data_info = test_data_info)
         debug(eval_all_test_data=eval_all_test_data)
 
     with open(config["log_path"], 'a') as log:
         log.write("eval_all_test_data:" + str(eval_all_test_data)+"\n")
-    debug(config_path=config_path)
+    debug(config_path = config_path, log_path=config["log_path"])

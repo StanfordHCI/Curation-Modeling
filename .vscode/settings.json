@@ -20,8 +20,8 @@
         "terminal.ansiRed": "#C7AE95",
         "terminal.ansiWhite": "#C7CCD1",
         "terminal.ansiYellow": "#AEC795",
-        "activityBar.background": "#0B323A",
-        "titleBar.activeBackground": "#0F4651",
+        "activityBar.background": "#0099ffb0",
+        "titleBar.activeBackground": "#0099ffb0",
         "titleBar.activeForeground": "#F6FCFD"
     }
 }

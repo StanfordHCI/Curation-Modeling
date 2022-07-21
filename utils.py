@@ -6,6 +6,7 @@ import yaml
 import torch
 from superdebug import debug
 use_debug = True
+
 def merge_dict(main_dict, new_dict):
     for key, value in new_dict.items():
         if isinstance(value, dict):
@@ -17,7 +18,8 @@ def merge_dict(main_dict, new_dict):
     return main_dict
 
 def get_config(config_path, suffix="_train"):
-    default_config = yaml.safe_load(open('default_config.yml', 'r'))
+    default_config_path = 'default_config.yml'
+    default_config = yaml.safe_load(open(default_config_path, 'r'))
     custom_config = yaml.safe_load(open(config_path, 'r'))
     config = merge_dict(default_config, custom_config)
     config["save_model_dir"] = os.path.join("trained_models", os.path.basename(config_path).split(".")[0])
@@ -25,6 +27,9 @@ def get_config(config_path, suffix="_train"):
     log_path = os.path.join(config["save_model_dir"], os.path.basename(config_path).split(".")[0]+suffix+".log")
     if os.path.exists(log_path): os.remove(log_path)
     shutil.copy(config_path, log_path)
+    with open(log_path, 'a') as log:
+        log.write("\n----------------- Below is default config -----------------\n")
+        log.write(open(default_config_path, 'r').read())
     if config["device"] != -1 and torch.cuda.is_available():
         print('GPU ready...')
         if config["device"] == -2:
@@ -50,8 +55,8 @@ def get_config(config_path, suffix="_train"):
         config["gpus"] = None
     config["log_path"] = log_path
     now = datetime.datetime.now()
-    with open(config["log_path"], 'a') as log:
-        log.write("-----------------" + f"{now.year}/{now.month}/{now.day} {now.hour}:{now.minute}" + "-----------------\n")
+    with open(log_path, 'a') as log:
+        log.write("\n-----------------" + f"{now.year}/{now.month}/{now.day} {now.hour}:{now.minute}" + "-----------------\n")
     
     return config
     

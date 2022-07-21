@@ -1,0 +1,12 @@
+sample_ratio: 0.05
+model_type: DCN
+prepared_data_path: data/reddit/prepared_med_ID_sim_new_votes.pt
+downvote_weight: 1.35
+batch_size: 64
+user_grouping_method: single_user_as_group
+num_epochs: 10
+use_language_model_encoder: False
+sample_part_voted_users: True
+use_voted_users_feature: True
+user_normalization: equal
+train_test_different_submissions: True

@@ -1,5 +1,6 @@
 *.ckpt
 .idea/
+.vscode/
 super_debug/
 data/
 output/

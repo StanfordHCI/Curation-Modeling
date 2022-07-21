@@ -6,4 +6,4 @@ batch_size: 64
 user_grouping_method: single_user_as_group
 num_epochs: 5
 use_language_model_encoder: False
-sample_column: "SUBMISSION_ID"
+sample_method: "SUBMISSION_ID"

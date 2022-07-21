@@ -1,6 +1,7 @@
 import argparse
 from collections import Counter, OrderedDict, defaultdict
 import random
+from typing import Union
 import warnings
 from matplotlib import pyplot as plt
 import numpy as np
@@ -18,25 +19,52 @@ from superdebug import debug
 import os
 import pickle
 from utils import get_config, parse_config
-def sample_load_dataset(sample_ratio = 1, sample_column = 'USERNAME'):
+def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USERNAME'):
     vote_data = pd.read_csv('data/reddit/44_million_votes.txt', sep = '\t')
     # SUBMISSION_ID SUBREDDIT    CREATED_TIME    USERNAME    VOTE
     # t3_e0i7l4	r/nagatoro		TeddehBear	upvote
     vote_data['SUBMISSION_ID'] = vote_data['SUBMISSION_ID'].astype(str)
     debug(vote_data_num = len(vote_data))
 
-    # sample x% of the users/submissions, include all the voting data involving these users/submissions
-    all_usernames = set(vote_data[sample_column])
+    if type(sample_method) == str:
+        sample_method = [sample_method]
+    selected_entries = None
     if sample_ratio < 1:
-        random.seed(42)
-        selected_usernames = set(random.sample(list(all_usernames), k = int(sample_ratio * len(all_usernames))))
-        vote_data = vote_data[vote_data[sample_column].isin(selected_usernames)] 
+        if "most_votes" in sample_method:
+            debug(f"Sampling {sample_ratio} of the most voted posts...")
+            sample_column = "SUBMISSION_ID"
+            submission_vote_num = Counter(vote_data["SUBMISSION_ID"])
+            most_voted_submissions = list(submission_vote_num.keys())
+            most_voted_submissions.sort(key = lambda x:submission_vote_num[x], reverse = True)
+            selected_entries = set()
+            total_vote_num = 0
+            for submission_id in most_voted_submissions:
+                selected_entries.add(submission_id)
+                total_vote_num += submission_vote_num[submission_id]
+                if total_vote_num >= sample_ratio * len(vote_data):
+                    break
+        elif "USERNAME" in sample_method:
+            sample_column = "USERNAME"
+        elif "SUBMISSION_ID" in sample_method:
+            sample_column = "SUBMISSION_ID"
+        if "most_votes" not in sample_method:
+            debug(f"Sampling {sample_ratio} of the {sample_column}s...")
+        # sample x% of the users/submissions, include all the voting data involving these users/submissions
+        if selected_entries is None:
+            all_entries = set(vote_data[sample_column])
+            random.seed(42)
+            selected_entries = set(random.sample(list(all_entries), k = int(sample_ratio * len(all_entries))))
+        vote_data = vote_data[vote_data[sample_column].isin(selected_entries)] 
         debug(vote_data_num = len(vote_data))
-    else:
-        selected_usernames = all_usernames
 
     # For each user, sample upvote:downvote = 1:1
-    if sample_column == 'USERNAME':
+    if "equal_up_down_votes" in sample_method:
+        debug(f"Sampling so that upvote:downvote = 1:1")
+        if sample_column == "USERNAME":
+            selected_usernames = selected_entries
+        else:
+            selected_usernames = set(vote_data["USERNAME"])
+
         random.seed(42)
         user_votes = defaultdict(list)
         for row_i, row in tqdm(vote_data.iterrows()):
@@ -127,9 +155,16 @@ def get_feature_columns(data, sparse_features, sparse_features_embed_dims, varle
     feature_names = get_feature_names(all_feature_columns) # record feature field name
     debug(feature_names=feature_names)
     return all_feature_columns, feature_names, max_voted_users
-def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0):
+def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0, train_test_different_submissions = False):
     if train_at_least_n_votes == 0:
-        train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
+        if not train_test_different_submissions:
+            train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
+        else:
+            debug("Splitting train test set using different submissions")
+            all_submissions = list(set(data["SUBMISSION_ID"]))
+            test_submissions = random.sample(all_submissions, int(0.2 * len(all_submissions)))
+            test_data = data[data["SUBMISSION_ID"].isin(test_submissions)]
+            train_data = data[~data["SUBMISSION_ID"].isin(test_submissions)]
     else:
         random.seed(42)
         train_data, test_data = [], []
@@ -153,6 +188,13 @@ def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0):
     debug(train_vote_num = len(train_data), test_vote_num = len(test_data))
     return train_data, test_data
 
+def get_test_data_info(train_data:pd.DataFrame, test_data:pd.DataFrame):
+    train_submission_votes_num = Counter(train_data["SUBMISSION_ID"])
+    train_user_votes_num = Counter(train_data["USERNAME"])
+    test_data_info = pd.DataFrame()
+    test_data_info["train_submission_votes_num"] = test_data.apply(lambda row:train_submission_votes_num[row["SUBMISSION_ID"]], axis = 1)
+    test_data_info["train_user_votes_num"] = test_data.apply(lambda row:train_user_votes_num[row["USERNAME"]], axis = 1)
+    return test_data_info
 def collect_users_votes_data(train_data:pd.DataFrame, test_data:pd.DataFrame, train_model_input, test_model_input):
     voted_users = defaultdict(set)
     for row_i, row in tqdm(train_data.iterrows()):
@@ -185,10 +227,10 @@ def get_model_input(config):
     if config["save_and_load_prepared_data"] and os.path.exists(prepared_data_path):
         debug("Loading prepared data...")
         with open(prepared_data_path, "rb") as f:
-            all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data = pickle.load(f)
+            all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info = pickle.load(f)
     else:
         debug("Preparing data...")
-        all_data = sample_load_dataset(config["sample_ratio"], config["sample_column"])
+        all_data = sample_load_dataset(config["sample_ratio"], config["sample_method"])
         if config["use_language_model_encoder"]:
             all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
         sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target = get_selected_feature(config["use_language_model_encoder"], config["encoder_hidden_dim"], config["use_voted_users_feature"])
@@ -196,7 +238,8 @@ def get_model_input(config):
         featured_data, original_feature_map = transform_features(cleared_data, sparse_features, varlen_sparse_features, dense_features, target)
         all_feature_columns, feature_names, max_voted_users = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)
         debug(featured_data=featured_data)
-        train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"])
+        train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"], train_test_different_submissions = config["train_test_different_submissions"])
+        test_data_info = get_test_data_info(train_data, test_data)
         train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
         test_model_input = {name:test_data[name] for name in feature_names if name in test_data}
         if config["use_voted_users_feature"]:
@@ -204,7 +247,11 @@ def get_model_input(config):
         train_model_input, test_model_input = tokenize_submission_text(train_data, test_data, train_model_input, test_model_input, config)
         if config["save_and_load_prepared_data"]:
             with open(prepared_data_path, "wb") as f:
-                pickle.dump((all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data), f)
+                pickle.dump((all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info), f)
             debug(f"Prepared data saved to {prepared_data_path}")
-    return all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data
+    return all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info
 
+if __name__ == '__main__':
+    config_path, config = parse_config()
+    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info = get_model_input(config)
+    debug(config_path=config_path)
