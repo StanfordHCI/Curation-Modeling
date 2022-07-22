@@ -5,6 +5,6 @@ downvote_weight: 1.35
 batch_size: 64
 num_epochs: 5
 use_language_model_encoder: False
-sample_part_voted_users: True
 use_voted_users_feature: True
+sample_part_voted_users: True
 user_normalization: null # equal

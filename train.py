@@ -43,7 +43,7 @@ def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
     else:
         val = metric_func(y_true, y_pred, sample_weight=sample_weight)
     return val
-def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, max_voted_users=100):
+def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, max_voted_users=100, step_generator = False):
     """
     :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
         dictionary mapping input names to Numpy arrays.
@@ -57,6 +57,7 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
     :param shuffle: Boolean. Whether to shuffle the order of the batches at the beginning of each epoch.
     """
     assert isinstance(x, dict)
+    if step_generator: assert epochs == 1 and batch_size == 1
     if model.lm_encoder is not None:
         assert "input_ids" in x, "Make sure train_model_input contains tokenized reddit text"
         text_input_ids = x["input_ids"]
@@ -98,7 +99,8 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
     if config["load_pretrained_model"]:
         model, optim, initial_epoch, best_eval_acc, save_dict = load_model(config["save_model_dir"], model, optim, initial_epoch, best_eval_acc)
     if model.gpus:
-        print('parallel running on these gpus:', model.gpus)
+        if not step_generator:
+            print('parallel running on these gpus:', model.gpus)
         _model = torch.nn.DataParallel(model, device_ids=model.gpus)
         batch_size *= len(model.gpus)  # input `batch_size` is batch_size per gpu
     else:
@@ -107,16 +109,19 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
     sample_num = len(train_tensor_data)
     steps_per_epoch = (sample_num - 1) // batch_size + 1
     # Train
-    print("Train on {0} samples, validate on {1} samples, {2} steps per epoch".format(
-        len(train_tensor_data), len(val_y), steps_per_epoch))
+    if not step_generator:
+        print("Train on {0} samples, validate on {1} samples, {2} steps per epoch".format(len(train_tensor_data), len(val_y), steps_per_epoch))
     for epoch in range(initial_epoch, epochs):
         # epoch_logs = {}
         start_time = time.time()
         loss_epoch = 0
         total_loss_epoch = 0
         train_result = {}
-        for _, train_input in tqdm(enumerate(train_loader), total = steps_per_epoch, desc = "Training"):
+        if not step_generator:
+            train_loader = tqdm(train_loader, total = steps_per_epoch, desc = "Training")
+        for _, train_input in enumerate(train_loader):
             x, y, weight = convert_CTR_model_input(model, train_input, sample_voted_users=config["sample_part_voted_users"])
+            # debug(x=x[0], y = y[0])
             y_pred = _model(x)
 
             optim.zero_grad()
@@ -130,40 +135,43 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
             total_loss.backward()
             optim.step()
 
-            if verbose > 0:
+            if verbose > 0 and not step_generator:
                 for name, metric_func in model.metrics.items():
                     if name not in train_result:
                         train_result[name] = []
                     metric_result = apply_metric(metric_func, y.cpu().numpy(), y_pred.reshape(y.shape).cpu().data.numpy())
                     train_result[name].append(metric_result)
+            if step_generator:
+                yield model
 
+        if not step_generator:
+            # Add epoch_logs
+            # epoch_logs["loss"] = total_loss_epoch / sample_num
+            # for name, result in train_result.items():
+                # epoch_logs[name] = np.sum(result) / steps_per_epoch
 
-        # Add epoch_logs
-        # epoch_logs["loss"] = total_loss_epoch / sample_num
-        # for name, result in train_result.items():
-            # epoch_logs[name] = np.sum(result) / steps_per_epoch
-
-        if do_validation:
-            eval_result = evaluate_model(model, val_x, val_text_input_ids, val_text_token_type_ids, val_text_attention_mask, val_y, weights = val_weights, batch_size=batch_size)
-            # for name, result in eval_result.items():
-            #     epoch_logs["val_" + name] = result
-            best_eval_acc = max(best_eval_acc, eval_result["acc"])
-        # verbose
-        if verbose > 0:
-            epoch_time = int(time.time() - start_time)
-            print('Epoch {0}/{1}'.format(epoch + 1, epochs))
-            eval_str = "{0}s - loss: {1: .4f}".format(epoch_time, total_loss_epoch / sample_num)
-            for name, result in train_result.items():
-                eval_str += " - " + name + ": {0: .4f}".format(np.sum(result) / steps_per_epoch)
             if do_validation:
-                for name, result in eval_result.items():
-                    eval_str += " - " + "val_" + name + ": {0: .4f}".format(result)
-            print(eval_str)
-            with open(config["log_path"], 'a') as log:
-                log.write(eval_str+"\n")
-        save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"])
-        if best_eval_acc == eval_result["acc"]:
-            save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"], "best")
+                eval_result = evaluate_model(model, val_x, val_text_input_ids, val_text_token_type_ids, val_text_attention_mask, val_y, weights = val_weights, batch_size=batch_size)
+                # for name, result in eval_result.items():
+                #     epoch_logs["val_" + name] = result
+                best_eval_acc = max(best_eval_acc, eval_result["acc"])
+            # verbose
+            if verbose > 0:
+                epoch_time = int(time.time() - start_time)
+                print('Epoch {0}/{1}'.format(epoch + 1, epochs))
+                eval_str = "{0}s - loss: {1: .4f}".format(epoch_time, total_loss_epoch / sample_num)
+                for name, result in train_result.items():
+                    eval_str += " - " + name + ": {0: .4f}".format(np.sum(result) / steps_per_epoch)
+                if do_validation:
+                    for name, result in eval_result.items():
+                        eval_str += " - " + "val_" + name + ": {0: .4f}".format(result)
+                print(eval_str)
+                with open(config["log_path"], 'a') as log:
+                    log.write(eval_str+"\n")
+            save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"])
+            if best_eval_acc == eval_result["acc"]:
+                save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"], "best")
+    yield None
 def sample_updown_voted_users(x:torch.tensor, model, vote = "upvote", interactive = False):
     if x is None: return None
     updown_voted_users_batch_orig = x[:,model.feature_index[f"{vote.upper()}D_USERS"][0]:model.feature_index[f"{vote.upper()}D_USERS"][1]]
@@ -219,7 +227,7 @@ def get_data_loader(has_lm_encoder, x, text_input_ids,text_token_type_ids,text_a
     data_loader = DataLoader(dataset=tensor_data, shuffle=shuffle, batch_size=batch_size)
     return tensor_data, data_loader
 
-def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256, sample_voted_users=False, max_voted_users=100, return_prediction = False, data_info = None):
+def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256, sample_voted_users=False, max_voted_users=100, return_prediction = False, data_info = None, disable_tqdm = False):
     model = model.eval()
     if isinstance(x, dict):
         if "UPVOTED_USERS" in x:
@@ -233,8 +241,11 @@ def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention
 
     tensor_data, test_loader = get_data_loader(model.lm_encoder is not None, x, text_input_ids,text_token_type_ids,text_attention_mask, y, weights, shuffle=False, batch_size=batch_size)
     pred_ans = []
+
+    if not disable_tqdm:
+        test_loader = tqdm(test_loader)
     with torch.no_grad():
-        for _, test_input in enumerate(tqdm(test_loader)):
+        for _, test_input in enumerate(test_loader):
             x, _y, weight = convert_CTR_model_input(model, test_input, sample_voted_users=sample_voted_users)
             y_pred = model(x).cpu().data.numpy()  # .squeeze()
             pred_ans.append(y_pred)
@@ -253,10 +264,12 @@ def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention
             filter = test_filter[filter_name]
             eval_result[f"{filter_name}{'_with_weight' if wei is not None else ''}"] = 0
             for name, metric_func in model.metrics.items():
-                eval_result[f"{name}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[filter], pred_ans[filter], sample_weight=wei[filter] if wei is not None else None)
+                if 0 not in y[filter].shape:
+                    eval_result[f"{name}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[filter], pred_ans[filter], sample_weight=wei[filter] if wei is not None else None)
                 if data is not None:
                     for vote in [0, 1]:
-                        eval_result[f"{name}_vote_{vote}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[(data["VOTE"] == vote).to_numpy() * filter], pred_ans[(data["VOTE"] == vote).to_numpy() * filter], sample_weight=wei[(data["VOTE"] == vote).to_numpy() * filter] if wei is not None else None)
+                        if 0 not in y[(data["VOTE"] == vote).to_numpy() * filter].shape:
+                            eval_result[f"{name}_vote_{vote}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[(data["VOTE"] == vote).to_numpy() * filter], pred_ans[(data["VOTE"] == vote).to_numpy() * filter], sample_weight=wei[(data["VOTE"] == vote).to_numpy() * filter] if wei is not None else None)
     model = model.train()
     return eval_result
 
@@ -266,7 +279,7 @@ if __name__ == "__main__":
     all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info = get_model_input(config)
     model = get_model(config, all_feature_columns, feature_names)
     train_weights = get_normalization_weights(train_data, config)
-    history = train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2, max_voted_users=max_voted_users)
+    next(train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2, max_voted_users=max_voted_users))
     model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
     test_weights = get_normalization_weights(test_data, config)
     if config["use_voted_users_feature"]:

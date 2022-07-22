@@ -148,7 +148,7 @@ def transform_features(data, sparse_features, varlen_sparse_features, dense_feat
 def get_feature_columns(data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features):
     sparse_feature_columns = [SparseFeat(feat, vocabulary_size=(data[feat].nunique() if feat in data else 1),embedding_dim=sparse_features_embed_dims[feat]) for i,feat in enumerate(sparse_features)] # count #unique features for each sparse field, transform sparse features into dense vectors by embedding techniques
     max_voted_users = Counter(data["SUBMISSION_ID"]).most_common(1)[0][-1]
-    varlen_sparse_feature_columns = [VarLenSparseFeat(SparseFeat(feat, vocabulary_size=data["USERNAME"].nunique()+1, embedding_dim=varlen_sparse_features_embed_dims[feat]), maxlen=max_voted_users, combiner='sum') for i,feat in enumerate(varlen_sparse_features)]
+    varlen_sparse_feature_columns = [VarLenSparseFeat(SparseFeat(feat, vocabulary_size=data["USERNAME"].nunique()+1, embedding_dim=varlen_sparse_features_embed_dims[feat]), maxlen=max_voted_users, combiner='max') for i,feat in enumerate(varlen_sparse_features)]
     dense_feature_columns = [DenseFeat(feat, 1,) for feat in dense_features]
     debug(sparse_feature_columns=sparse_feature_columns, varlen_sparse_feature_columns=varlen_sparse_feature_columns, dense_feature_columns=dense_feature_columns)
     all_feature_columns = sparse_feature_columns + varlen_sparse_feature_columns + dense_feature_columns 
