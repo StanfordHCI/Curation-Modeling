@@ -1,11 +1,12 @@
 sample_ratio: 0.05
 model_type: DCN
 prepared_data_path: data/reddit/prepared_med_ID_sim_new_votes.pt
-downvote_weight: 1.6
+downvote_weight: 4
 batch_size: 64
 num_epochs: 5
 use_language_model_encoder: False
 sample_part_voted_users: False
 use_voted_users_feature: True
-user_normalization: equal
+user_normalization: null
 train_test_different_submissions: True
+add_target_user_ratio: 0.3

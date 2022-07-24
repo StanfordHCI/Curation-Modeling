@@ -45,8 +45,7 @@ def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
     return val
 def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, max_voted_users=100, step_generator = False):
     """
-    :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
-        dictionary mapping input names to Numpy arrays.
+    :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a dictionary mapping input names to Numpy arrays.
     :param y: Numpy array of target (label) data (if the model has a single output), or list of Numpy arrays (if the model has multiple outputs).
     :param batch_size: Integer or `None`. Number of samples per gradient update. If unspecified, `batch_size` will default to 256.
     :param epochs: Integer. Number of epochs to train the model. An epoch is an iteration over the entire `x` and `y` data provided. Note that in conjunction with `initial_epoch`, `epochs` is to be understood as "final epoch". The model is not trained for a number of iterations given by `epochs`, but merely until the epoch of index `epochs` is reached.
@@ -120,7 +119,7 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
         if not step_generator:
             train_loader = tqdm(train_loader, total = steps_per_epoch, desc = "Training")
         for _, train_input in enumerate(train_loader):
-            x, y, weight = convert_CTR_model_input(model, train_input, sample_voted_users=config["sample_part_voted_users"])
+            x, y, weight = convert_CTR_model_input(model, train_input, sample_voted_users=config["sample_part_voted_users"], add_target_user_ratio = config["add_target_user_ratio"])
             # debug(x=x[0], y = y[0])
             y_pred = _model(x)
 
@@ -172,30 +171,45 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
             if best_eval_acc == eval_result["acc"]:
                 save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"], "best")
     yield None
-def sample_updown_voted_users(x:torch.tensor, model, vote = "upvote", interactive = False):
+def modify_updown_voted_users(x:torch.tensor, y:torch.tensor, model, vote = "upvote", sample_voted_users = False, add_target_user_ratio = 0, interactive = False):
     if x is None: return None
     updown_voted_users_batch_orig = x[:,model.feature_index[f"{vote.upper()}D_USERS"][0]:model.feature_index[f"{vote.upper()}D_USERS"][1]]
+    target_user_batch = x[:,model.feature_index["USERNAME"][0]:model.feature_index["USERNAME"][1]]
     updown_voted_users_batch = updown_voted_users_batch_orig.new_zeros(updown_voted_users_batch_orig.shape)
+
     for batch_i in range(len(updown_voted_users_batch_orig)):
         updown_voted_users = set(tuple(updown_voted_users_batch_orig[batch_i].cpu().numpy()))
         if 0 in updown_voted_users:
             updown_voted_users.remove(0)
-        if not interactive:
-            sample_num = random.randint(0, len(updown_voted_users))
-            sampled_updown_voted_users = random.sample(list(updown_voted_users), sample_num)
+
+        # sample voted users
+        if sample_voted_users:
+            if not interactive:
+                sample_num = random.randint(0, len(updown_voted_users))
+                sampled_updown_voted_users = random.sample(list(updown_voted_users), sample_num)
+            else:
+                print(f"Original {vote}d users:", list(updown_voted_users))
+                selected_users = input(f"Please select {model.feature_index[f'{vote.upper()}D_USERS'][1] - model.feature_index[f'{vote.upper()}D_USERS'][0]} {vote}d users (input '.' to stop): ")
+                if selected_users == ".":
+                    return None
+                sampled_updown_voted_users = [int(user) for user in selected_users.split() if int(user) != 0]
+                print(f"New {vote}d users:", sampled_updown_voted_users)
         else:
-            print(f"Original {vote}d users:", list(updown_voted_users))
-            selected_users = input(f"Please select {model.feature_index[f'{vote.upper()}D_USERS'][1] - model.feature_index[f'{vote.upper()}D_USERS'][0]} {vote}d users (input '.' to stop): ")
-            if selected_users == ".":
-                return None
-            sampled_updown_voted_users = [int(user) for user in selected_users.split() if int(user) != 0]
-            print(f"New {vote}d users:", sampled_updown_voted_users)
+            sampled_updown_voted_users = list(updown_voted_users)
+
+        # add target user to peers
+        if add_target_user_ratio != 0 and random.random() < add_target_user_ratio:
+            if (y[batch_i] == 0 and vote == "downvote") or (y[batch_i] == 1 and vote == "upvote"):
+                sampled_updown_voted_users.append(target_user_batch[batch_i])
+                # sampled_updown_voted_users = [target_user_batch[batch_i]]
+        
         sampled_updown_voted_users = torch.tensor(sampled_updown_voted_users)
         updown_voted_users_batch[batch_i, :len(sampled_updown_voted_users)] = sampled_updown_voted_users
+
     x_new = x.clone()
     x_new[:, model.feature_index[f"{vote.upper()}D_USERS"][0]:model.feature_index[f"{vote.upper()}D_USERS"][1]] = updown_voted_users_batch
     return x_new
-def convert_CTR_model_input(model, dataloader_input, sample_voted_users = False, interactive = False):
+def convert_CTR_model_input(model, dataloader_input, sample_voted_users = False, add_target_user_ratio = 0, interactive = False):
     if model.lm_encoder is not None:
         (x, y, weight, text_input_ids, text_token_type_ids, text_attention_mask) = dataloader_input
         text_input_ids, text_token_type_ids, text_attention_mask = to_device(model.device, False, text_input_ids, text_token_type_ids, text_attention_mask)
@@ -203,9 +217,9 @@ def convert_CTR_model_input(model, dataloader_input, sample_voted_users = False,
         encoder_hidden_pooled = (text_attention_mask[:,:,None] * encoder_hidden).sum(axis=1) / text_attention_mask.sum(axis = 1, keepdim = True)
     else:
         x, y, weight = dataloader_input
-    if "UPVOTED_USERS" in model.feature_index and sample_voted_users:
-        x = sample_updown_voted_users(x, model, vote = "upvote", interactive = interactive)
-        x = sample_updown_voted_users(x, model, vote = "downvote", interactive = interactive)
+    if "UPVOTED_USERS" in model.feature_index:
+        x = modify_updown_voted_users(x, y, model, vote = "upvote", sample_voted_users = sample_voted_users, add_target_user_ratio = add_target_user_ratio, interactive = interactive)
+        x = modify_updown_voted_users(x, y, model, vote = "downvote", sample_voted_users = sample_voted_users, add_target_user_ratio = add_target_user_ratio, interactive = interactive)
         if x is None:
             return None
     x, y, weight = to_device(model.device, True, x, y, weight)
