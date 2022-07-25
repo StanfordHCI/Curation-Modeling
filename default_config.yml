@@ -15,7 +15,7 @@ user_normalization: equal # null for no normalization, equal for assigning user 
 save_and_load_prepared_data: True
 sample_ratio: 1
 sample_method: ['most_votes', "equal_up_down_votes"]
-sparse_features_embed_dims: {'USERNAME':256, 'SUBREDDIT':32, 'AUTHOR':32}
+sparse_features_embed_dims: {'SUBMISSION_ID': 256, 'USERNAME': 256, 'SUBREDDIT': 32, 'AUTHOR': 32}
 dense_features: ['CREATED_TIME', 'NSFW']
 use_voted_users_feature: True
 sample_part_voted_users: True

@@ -153,7 +153,8 @@ def get_selected_feature(dense_features, sparse_features_embed_dims, use_lm = Fa
         for i in range(encoder_hidden_dim):
             dense_features.append(f'LM_ENCODING_{i}')
     else:
-        sparse_features_embed_dims['SUBMISSION_ID'] = 256
+        if 'SUBMISSION_ID' in sparse_features_embed_dims:
+            del sparse_features_embed_dims['SUBMISSION_ID']
     sparse_features = list(sparse_features_embed_dims.keys())
     if use_voted_users_feature:
         varlen_sparse_features_embed_dims = OrderedDict([('UPVOTED_USERS',256), ('DOWNVOTED_USERS',256)])

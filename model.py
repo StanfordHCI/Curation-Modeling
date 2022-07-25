@@ -23,6 +23,7 @@ def get_ctr_model(model_type):
         "DIEN": deepctr_torch.models.DIEN,
         "DIN": deepctr_torch.models.DIN,
         "AFN": deepctr_torch.models.AFN,
+        "Linear": deepctr_torch.models.dcn.LinearModel
     }
     return models[model_type]
 

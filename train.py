@@ -169,8 +169,8 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
                 with open(config["log_path"], 'a') as log:
                     log.write(eval_str+"\n")
             save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"])
-            if best_eval_acc == eval_result["acc"]:
-                save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"], "best")
+            if best_eval_acc == eval_result["acc_with_weight"]:
+                save_model(model, epoch, eval_result["acc_with_weight"], optim, config["save_model_dir"], "best")
     yield None
 def modify_updown_voted_users(x:torch.tensor, y:torch.tensor, model, vote = "upvote", sample_voted_users = False, add_target_user_ratio = 0, interactive = False):
     if x is None: return None
@@ -186,7 +186,12 @@ def modify_updown_voted_users(x:torch.tensor, y:torch.tensor, model, vote = "upv
         # sample voted users
         if sample_voted_users:
             if not interactive:
-                sample_num = random.randint(0, len(updown_voted_users))
+                weight = 1/3
+                sample_weights = [weight]
+                for weight_i in range(len(updown_voted_users)):
+                    weight = weight * 2/3
+                    sample_weights.append(weight)
+                sample_num = random.choices(list(range(len(updown_voted_users) + 1)), sample_weights)[0]
                 sampled_updown_voted_users = random.sample(list(updown_voted_users), sample_num)
             else:
                 print(f"Original {vote}d users:", list(updown_voted_users))
@@ -201,8 +206,8 @@ def modify_updown_voted_users(x:torch.tensor, y:torch.tensor, model, vote = "upv
         # add target user to peers
         if add_target_user_ratio != 0 and random.random() < add_target_user_ratio:
             if (y[batch_i] == 0 and vote == "downvote") or (y[batch_i] == 1 and vote == "upvote"):
-                sampled_updown_voted_users.append(target_user_batch[batch_i])
-                # sampled_updown_voted_users = [target_user_batch[batch_i]]
+                # sampled_updown_voted_users.append(target_user_batch[batch_i])
+                sampled_updown_voted_users = [target_user_batch[batch_i]]
         
         sampled_updown_voted_users = torch.tensor(sampled_updown_voted_users)
         updown_voted_users_batch[batch_i, :len(sampled_updown_voted_users)] = sampled_updown_voted_users
