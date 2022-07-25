@@ -19,6 +19,48 @@ from superdebug import debug
 import os
 import pickle
 from utils import get_config, parse_config
+
+def find_correlated_user_pairs(vote_data, num_same_posts_thres):
+    if os.path.exists("output/user_pair_agreement_level.pt"):
+        user_pair_agreement_level = pickle.load(open("output/user_pair_agreement_level.pt", "rb"))
+    else:
+        usernames = vote_data["USERNAME"].to_numpy()
+        user_votes_count = Counter(usernames)
+        unique_users = {user for user in user_votes_count if user_votes_count[user] >= num_same_posts_thres}
+
+        vote_data = vote_data[vote_data["USERNAME"].isin(unique_users)]
+        submission_ids = vote_data["SUBMISSION_ID"].to_numpy()
+        votes = vote_data["VOTE"].to_numpy()
+        user_voted_posts = defaultdict(set)
+        user_vote_on_posts = defaultdict(set)
+
+        for row_i, username in enumerate(tqdm(usernames)):
+            user_voted_posts[username].add(submission_ids[row_i])
+            user_vote_on_posts[username].add(f"{submission_ids[row_i]}-{votes[row_i]}")
+
+        user_pair_agreement_level = []
+        unique_users = list(unique_users)
+        for a_i, user_a in enumerate(tqdm(unique_users)):
+            for user_b in unique_users[a_i + 1:]:
+                if user_b != user_a:
+                    num_same_posts = len(user_voted_posts[user_a] & user_voted_posts[user_b])
+                    if num_same_posts >= num_same_posts_thres:
+                        num_same_votes = len(user_vote_on_posts[user_a] & user_vote_on_posts[user_b])
+                        user_pair_agreement_level.append(((user_a, user_b), abs(num_same_votes/num_same_posts - 0.5), num_same_posts))
+        
+        user_pair_agreement_level.sort(reverse=True, key=lambda x:x[1] * 10000000 + x[2])
+        print(len(user_pair_agreement_level))
+        pickle.dump(user_pair_agreement_level, open("output/user_pair_agreement_level.pt", "wb"))
+    debug("Get correlated user pairs")
+    
+    correlated_user_pairs = []
+    selected_users = set()
+    for user_pair in user_pair_agreement_level:
+        if user_pair[1] > 0.48:
+            correlated_user_pairs.append(user_pair[0])
+            selected_users.update(user_pair[0])
+    return user_pair_agreement_level, correlated_user_pairs, selected_users
+
 def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USERNAME'):
     vote_data = pd.read_csv('data/reddit/44_million_votes.txt', sep = '\t')
     # SUBMISSION_ID SUBREDDIT    CREATED_TIME    USERNAME    VOTE
@@ -43,6 +85,9 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
                 total_vote_num += submission_vote_num[submission_id]
                 if total_vote_num >= sample_ratio * len(vote_data):
                     break
+        elif "correlated_user_pairs" in sample_method:
+            user_pair_agreement_level, correlated_user_pairs, selected_entries = find_correlated_user_pairs(vote_data, num_same_posts_thres=30)
+            sample_column = "USERNAME"
         elif "USERNAME" in sample_method:
             sample_column = "USERNAME"
         elif "SUBMISSION_ID" in sample_method:
@@ -66,22 +111,24 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
             selected_usernames = set(vote_data["USERNAME"])
 
         random.seed(42)
-        user_votes = defaultdict(list)
-        for row_i, row in tqdm(vote_data.iterrows()):
-            user_votes[f'{row["USERNAME"]}-{row["VOTE"]}'].append(row)
-        vote_data = []
+        user_votes_indices = defaultdict(list)
+        usernames = vote_data["USERNAME"]
+        votes = vote_data["VOTE"]
+        for index in tqdm(vote_data.index): user_votes_indices[f'{usernames[index]}-{votes[index]}'].append(index)
+        vote_data_indices = []
         for username in tqdm(selected_usernames):
-            upvotes = user_votes[f'{username}-upvote']
-            downvotes = user_votes[f'{username}-downvote']
-            upvote_num = len(upvotes)
-            downvote_num = len(downvotes)
+            upvote_indices = user_votes_indices[f'{username}-upvote']
+            downvote_indices = user_votes_indices[f'{username}-downvote']
+            upvote_num = len(upvote_indices)
+            downvote_num = len(downvote_indices)
             if downvote_num < upvote_num:
-                upvotes = random.sample(upvotes, downvote_num)
+                upvote_indices = random.sample(upvote_indices, downvote_num)
             elif upvote_num < downvote_num:
-                downvotes = random.sample(downvotes, upvote_num)
-            vote_data.extend(upvotes)
-            vote_data.extend(downvotes)
-        vote_data = pd.DataFrame(vote_data)
+                downvote_indices = random.sample(downvote_indices, upvote_num)
+            vote_data_indices.extend(upvote_indices)
+            vote_data_indices.extend(downvote_indices)
+        vote_data_indices = set(vote_data_indices)
+        vote_data = vote_data[vote_data.index.isin(vote_data_indices)]
 
 
     submission_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t') # each submission is a separate post and have a forest of comments
@@ -99,9 +146,9 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
         assert vote == 'upvote' or vote == 'downvote', f'Vote {vote} is invalid'
     return all_data
 
-def get_selected_feature(use_lm = False, encoder_hidden_dim = 768, use_voted_users_feature = True):
-    dense_features = ['CREATED_TIME', 'NSFW'] # '#_COMMENTS', 'SCORE', 'UPVOTED_%' #! do not use those
-    sparse_features_embed_dims = OrderedDict([('USERNAME',256), ('SUBREDDIT',32), ('AUTHOR',32)]) # USERNAME is reader
+def get_selected_feature(dense_features, sparse_features_embed_dims, use_lm = False, encoder_hidden_dim = 768, use_voted_users_feature = True):
+    # dense_features: ['CREATED_TIME', 'NSFW'] #! do not use those: '#_COMMENTS', 'SCORE', 'UPVOTED_%' 
+    # sparse_features_embed_dims: {'USERNAME':256, 'SUBREDDIT':32, 'AUTHOR':32}, USERNAME is reader
     if use_lm:
         for i in range(encoder_hidden_dim):
             dense_features.append(f'LM_ENCODING_{i}')
@@ -156,9 +203,17 @@ def get_feature_columns(data, sparse_features, sparse_features_embed_dims, varle
     debug(feature_names=feature_names)
     return all_feature_columns, feature_names, max_voted_users
 def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0, train_test_different_submissions = False):
+    random.seed(42)
     if train_at_least_n_votes == 0:
+        data = data.sample(frac=1).reset_index(drop=True)
         if not train_test_different_submissions:
-            train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
+            # train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
+            # debug(train_data=train_data, test_data=test_data)
+            # assert len(set(test_data.index) & set(train_data.index)) == 0
+            all_indices = list(data.index)
+            test_indices = random.sample(all_indices, int(0.2 * len(all_indices)))
+            test_data = data[data.index.isin(test_indices)]
+            train_data = data[~data.index.isin(test_indices)]
         else:
             debug("Splitting train test set using different submissions")
             all_submissions = list(set(data["SUBMISSION_ID"]))
@@ -166,7 +221,6 @@ def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0, train_t
             test_data = data[data["SUBMISSION_ID"].isin(test_submissions)]
             train_data = data[~data["SUBMISSION_ID"].isin(test_submissions)]
     else:
-        random.seed(42)
         train_data, test_data = [], []
         submission_votes = defaultdict(list)
         for row_i, row in tqdm(data.iterrows()):
@@ -233,7 +287,7 @@ def get_model_input(config):
         all_data = sample_load_dataset(config["sample_ratio"], config["sample_method"])
         if config["use_language_model_encoder"]:
             all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
-        sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target = get_selected_feature(config["use_language_model_encoder"], config["encoder_hidden_dim"], config["use_voted_users_feature"])
+        sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target = get_selected_feature(config["dense_features"], config["sparse_features_embed_dims"], config["use_language_model_encoder"], config["encoder_hidden_dim"], config["use_voted_users_feature"])
         cleared_data = clean_data(all_data, sparse_features, dense_features)
         featured_data, original_feature_map = transform_features(cleared_data, sparse_features, varlen_sparse_features, dense_features, target)
         all_feature_columns, feature_names, max_voted_users = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)

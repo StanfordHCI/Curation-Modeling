@@ -43,7 +43,7 @@ def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
     else:
         val = metric_func(y_true, y_pred, sample_weight=sample_weight)
     return val
-def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, max_voted_users=100, step_generator = False):
+def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, max_voted_users=100, step_generator = False, n_step_per_sample = 1):
     """
     :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a dictionary mapping input names to Numpy arrays.
     :param y: Numpy array of target (label) data (if the model has a single output), or list of Numpy arrays (if the model has multiple outputs).
@@ -121,18 +121,19 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
         for _, train_input in enumerate(train_loader):
             x, y, weight = convert_CTR_model_input(model, train_input, sample_voted_users=config["sample_part_voted_users"], add_target_user_ratio = config["add_target_user_ratio"])
             # debug(x=x[0], y = y[0])
-            y_pred = _model(x)
+            for _step_i in range(n_step_per_sample):
+                y_pred = _model(x)
 
-            optim.zero_grad()
-            loss = loss_func(y_pred.reshape(y.shape), y, weight = weight.reshape(y.shape), reduction='sum')
-            reg_loss = model.get_regularization_loss()
+                optim.zero_grad()
+                loss = loss_func(y_pred.reshape(y.shape), y, weight = weight.reshape(y.shape), reduction='sum')
+                reg_loss = model.get_regularization_loss()
 
-            total_loss = loss + reg_loss + model.aux_loss
+                total_loss = loss + reg_loss + model.aux_loss
 
-            loss_epoch += loss.item()
-            total_loss_epoch += total_loss.item()
-            total_loss.backward()
-            optim.step()
+                loss_epoch += loss.item()
+                total_loss_epoch += total_loss.item()
+                total_loss.backward()
+                optim.step()
 
             if verbose > 0 and not step_generator:
                 for name, metric_func in model.metrics.items():
@@ -153,7 +154,7 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
                 eval_result = evaluate_model(model, val_x, val_text_input_ids, val_text_token_type_ids, val_text_attention_mask, val_y, weights = val_weights, batch_size=batch_size)
                 # for name, result in eval_result.items():
                 #     epoch_logs["val_" + name] = result
-                best_eval_acc = max(best_eval_acc, eval_result["acc"])
+                best_eval_acc = max(best_eval_acc, eval_result["acc_with_weight"])
             # verbose
             if verbose > 0:
                 epoch_time = int(time.time() - start_time)
@@ -294,18 +295,22 @@ if __name__ == "__main__":
     model = get_model(config, all_feature_columns, feature_names)
     train_weights = get_normalization_weights(train_data, config)
     next(train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2, max_voted_users=max_voted_users))
-    model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
-    test_weights = get_normalization_weights(test_data, config)
-    if config["use_voted_users_feature"]:
-        debug("Use all voted users as feature")
-    eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'], max_voted_users=max_voted_users,sample_voted_users=False, data_info = test_data_info)
-    debug(eval_all_test_data=eval_all_test_data)
 
-    if config["use_voted_users_feature"] and config["sample_part_voted_users"]:
-        debug("Sample part voted users as feature")
-        eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'],max_voted_users=max_voted_users, sample_voted_users=True, data_info = test_data_info)
-        debug(eval_all_test_data=eval_all_test_data)
+    model_types = ["latest", "best"]
+    for model_type in model_types:
+        model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
+        test_weights = get_normalization_weights(test_data, config)
+        if config["use_voted_users_feature"]:
+            debug("Use all voted users as feature")
+        eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'], max_voted_users=max_voted_users,sample_voted_users=False, data_info = test_data_info)
+        debug(eval_all_test_data=str(eval_all_test_data))
+        with open(config["log_path"], 'a') as log:
+            log.write(f"Evaluation result of the {model_type} model (use all voted users as feature):" + str(eval_all_test_data)+"\n")
 
-    with open(config["log_path"], 'a') as log:
-        log.write("eval_all_test_data:" + str(eval_all_test_data)+"\n")
+        if config["use_voted_users_feature"] and config["sample_part_voted_users"]:
+            debug("Sample part voted users as feature")
+            eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'],max_voted_users=max_voted_users, sample_voted_users=True, data_info = test_data_info)
+            debug(eval_all_test_data=str(eval_all_test_data))
+            with open(config["log_path"], 'a') as log:
+                log.write(f"Evaluation result of the {model_type} model (sample part voted users as feature):" + str(eval_all_test_data)+"\n")
     debug(config_path = config_path, log_path=config["log_path"])
