@@ -146,36 +146,24 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
         assert vote == 'upvote' or vote == 'downvote', f'Vote {vote} is invalid'
     return all_data
 
-def get_selected_feature(dense_features, sparse_features_embed_dims, use_lm = False, encoder_hidden_dim = 768, use_voted_users_feature = True):
-    # dense_features: ['CREATED_TIME', 'NSFW'] #! do not use those: '#_COMMENTS', 'SCORE', 'UPVOTED_%' 
-    # sparse_features_embed_dims: {'USERNAME':256, 'SUBREDDIT':32, 'AUTHOR':32}, USERNAME is reader
-    if use_lm:
-        for i in range(encoder_hidden_dim):
-            dense_features.append(f'LM_ENCODING_{i}')
-    else:
-        if 'SUBMISSION_ID' in sparse_features_embed_dims:
-            del sparse_features_embed_dims['SUBMISSION_ID']
-    sparse_features = list(sparse_features_embed_dims.keys())
-    if use_voted_users_feature:
-        varlen_sparse_features_embed_dims = OrderedDict([('UPVOTED_USERS',256), ('DOWNVOTED_USERS',256)])
-    else:
-        varlen_sparse_features_embed_dims = OrderedDict([])
-    varlen_sparse_features = list(varlen_sparse_features_embed_dims.keys())
-
+def get_selected_feature(config):
+    #! do not use those: '#_COMMENTS', 'SCORE', 'UPVOTED_%' 
+    categorical_features = config["categorical_features"]
+    string_features = config["string_features"]
     target = ['VOTE']
-    return sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target
+    return categorical_features, string_features, target
 
-def clean_data(data:pd.DataFrame, sparse_features, dense_features):
-    data["NSFW"] = data["NSFW"].map({"NSFW": 1, "":0, np.nan: 0, None: 0})
-    sparse_features = [feat for feat in sparse_features if feat in data]
-    dense_features = [feat for feat in dense_features if feat in data]
-    data[sparse_features] = data[sparse_features].fillna('n/a')
-    data[dense_features] = data[dense_features].fillna(0)
+def clean_data(data:pd.DataFrame, categorical_features, string_features):
+    data["NSFW"] = data["NSFW"].map({"NSFW":"true", "": "false", np.nan: "false", None: "false"})
+    categorical_features = [feat for feat in categorical_features if feat in data]
+    string_features = [feat for feat in string_features if feat in data]
+    data[categorical_features] = data[categorical_features].fillna('n/a')
+    data[string_features] = data[string_features].fillna("")
     return data
 
-def transform_features(data, sparse_features, varlen_sparse_features, dense_features, target):
+def transform_features(data, categorical_features, string_features, target):
     original_feature_map = defaultdict(dict)
-    for feature_name in sparse_features + varlen_sparse_features:
+    for feature_name in categorical_features:
         if feature_name in data:
             lbe = LabelEncoder()
             original_features = data[feature_name]
@@ -186,13 +174,12 @@ def transform_features(data, sparse_features, varlen_sparse_features, dense_feat
 
     lbe = LabelEncoder()
     data[target[0]] = lbe.fit_transform(data[target[0]])
-    # dense numerical features -> [0,1]
-    mms = MinMaxScaler(feature_range=(0,1))
-    dense_features = [feat for feat in dense_features if feat in data]
-    data[dense_features] = mms.fit_transform(data[dense_features])
-    debug(data=data)
+    # # dense numerical features -> [0,1]
+    # mms = MinMaxScaler(feature_range=(0,1))
+    # dense_features = [feat for feat in dense_features if feat in data]
+    # data[dense_features] = mms.fit_transform(data[dense_features])
     return data, original_feature_map
-
+"""
 def get_feature_columns(data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features):
     sparse_feature_columns = [SparseFeat(feat, vocabulary_size=(data[feat].nunique() if feat in data else 1),embedding_dim=sparse_features_embed_dims[feat]) for i,feat in enumerate(sparse_features)] # count #unique features for each sparse field, transform sparse features into dense vectors by embedding techniques
     max_voted_users = Counter(data["SUBMISSION_ID"]).most_common(1)[0][-1]
@@ -203,6 +190,7 @@ def get_feature_columns(data, sparse_features, sparse_features_embed_dims, varle
     feature_names = get_feature_names(all_feature_columns) # record feature field name
     debug(feature_names=feature_names)
     return all_feature_columns, feature_names, max_voted_users
+"""
 def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0, train_test_different_submissions = False):
     random.seed(42)
     if train_at_least_n_votes == 0:
@@ -250,20 +238,17 @@ def get_test_data_info(train_data:pd.DataFrame, test_data:pd.DataFrame):
     test_data_info["train_submission_votes_num"] = test_data.apply(lambda row:train_submission_votes_num[row["SUBMISSION_ID"]], axis = 1)
     test_data_info["train_user_votes_num"] = test_data.apply(lambda row:train_user_votes_num[row["USERNAME"]], axis = 1)
     return test_data_info
-def collect_users_votes_data(train_data:pd.DataFrame, test_data:pd.DataFrame, train_model_input, test_model_input):
+def collect_users_votes_data(train_data:pd.DataFrame, test_data:pd.DataFrame):
     voted_users = defaultdict(set)
     for row_i, row in tqdm(train_data.iterrows()):
         voted_users[f'{row["SUBMISSION_ID"]}-{row["VOTE"]}'].add(row["USERNAME"])
-    train_model_input["UPVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)
-    train_data.loc[:, "UPVOTED_USERS"] = train_model_input["UPVOTED_USERS"]
-    train_model_input["DOWNVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-0'] - {r["USERNAME"]}), axis=1)
-    train_data.loc[:, "DOWNVOTED_USERS"] = train_model_input["DOWNVOTED_USERS"]
-    test_model_input["UPVOTED_USERS"] = test_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)
-    test_data.loc[:, "UPVOTED_USERS"] = test_model_input["UPVOTED_USERS"]
-    test_model_input["DOWNVOTED_USERS"] = test_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-0'] - {r["USERNAME"]}), axis=1)
-    test_data.loc[:, "DOWNVOTED_USERS"] = test_model_input["DOWNVOTED_USERS"]
-    return train_data, test_data, train_model_input, test_model_input
+    train_data["UPVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)
+    train_data["DOWNVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-0'] - {r["USERNAME"]}), axis=1)
+    test_data["UPVOTED_USERS"] = test_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)
+    test_data["DOWNVOTED_USERS"] = test_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-0'] - {r["USERNAME"]}), axis=1)
+    return train_data, test_data
     
+"""
 def tokenize_submission_text(train_data:pd.DataFrame, test_data:pd.DataFrame, train_model_input, test_model_input, config):
     if "SUBMISSION_TEXT" in train_data.columns:
         train_submission_text = list(train_data["SUBMISSION_TEXT"])
@@ -274,6 +259,7 @@ def tokenize_submission_text(train_data:pd.DataFrame, test_data:pd.DataFrame, tr
         train_model_input.update(train_tokenized_submission_text)
         test_model_input.update(test_tokenized_submission_text)
     return train_model_input, test_model_input
+"""
 
 def get_model_input(config):
     prepared_data_path = config["prepared_data_path"]
@@ -282,31 +268,30 @@ def get_model_input(config):
     if config["save_and_load_prepared_data"] and os.path.exists(prepared_data_path):
         debug("Loading prepared data...")
         with open(prepared_data_path, "rb") as f:
-            all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info = pickle.load(f)
+            target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info = pickle.load(f)
     else:
         debug("Preparing data...")
         all_data = sample_load_dataset(config["sample_ratio"], config["sample_method"])
-        if config["use_language_model_encoder"]:
-            all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
-        sparse_features_embed_dims, sparse_features, varlen_sparse_features_embed_dims, varlen_sparse_features, dense_features, target = get_selected_feature(config["dense_features"], config["sparse_features_embed_dims"], config["use_language_model_encoder"], config["encoder_hidden_dim"], config["use_voted_users_feature"])
-        cleared_data = clean_data(all_data, sparse_features, dense_features)
-        featured_data, original_feature_map = transform_features(cleared_data, sparse_features, varlen_sparse_features, dense_features, target)
-        all_feature_columns, feature_names, max_voted_users = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)
+        all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
+        categorical_features, string_features, target = get_selected_feature(config)
+        cleared_data = clean_data(all_data, categorical_features, string_features)
+        featured_data, original_feature_map = transform_features(cleared_data, categorical_features, string_features, target)
         debug(featured_data=featured_data)
+        # all_feature_columns, feature_names, max_voted_users = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)
         train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"], train_test_different_submissions = config["train_test_different_submissions"])
         test_data_info = get_test_data_info(train_data, test_data)
-        train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
-        test_model_input = {name:test_data[name] for name in feature_names if name in test_data}
+        # train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
+        # test_model_input = {name:test_data[name] for name in feature_names if name in test_data}
         if config["use_voted_users_feature"]:
-            train_data, test_data, train_model_input, test_model_input = collect_users_votes_data(train_data, test_data, train_model_input, test_model_input)
-        train_model_input, test_model_input = tokenize_submission_text(train_data, test_data, train_model_input, test_model_input, config)
+            train_data, test_data = collect_users_votes_data(train_data, test_data)
+        # train_model_input, test_model_input = tokenize_submission_text(train_data, test_data, train_model_input, test_model_input, config)
         if config["save_and_load_prepared_data"]:
             with open(prepared_data_path, "wb") as f:
-                pickle.dump((all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info), f)
+                pickle.dump((target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info), f)
             debug(f"Prepared data saved to {prepared_data_path}")
-    return all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info
+    return target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info
 
 if __name__ == '__main__':
     config_path, config = parse_config()
-    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info = get_model_input(config)
+    target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info = get_model_input(config)
     debug(config_path=config_path)

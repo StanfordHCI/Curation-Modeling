@@ -1,8 +1,0 @@
-sample_ratio: 0.2
-model_type: MLR
-prepared_data_path: data/reddit/prepared_small_data.pt
-user_normalization: equal # equal
-downvote_weight: 6.5
-# user_grouping_method: "votes"
-user_grouping_method: single_user_as_group
-

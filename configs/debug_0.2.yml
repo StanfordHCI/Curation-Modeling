@@ -1,9 +1,0 @@
-sample_ratio: 0.2
-model_type: DCN
-prepared_data_path: data/reddit/prepared_0.2_text_data.pt
-downvote_weight: 6.5
-user_grouping_method: single_user_as_group
-num_epochs: 5
-use_language_model_encoder: True
-language_model_encoder_name: vinai/bertweet-base
-train_at_least_n_votes: 4

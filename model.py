@@ -1,6 +1,7 @@
 import torch
 from transformers import AutoModel, AutoTokenizer
 from utils import load_model
+import torch.nn as nn
 
 def get_ctr_model(model_type):
     import deepctr_torch.models
@@ -23,9 +24,12 @@ def get_ctr_model(model_type):
         "DIEN": deepctr_torch.models.DIEN,
         "DIN": deepctr_torch.models.DIN,
         "AFN": deepctr_torch.models.AFN,
-        "Linear": deepctr_torch.models.dcn.LinearModel
+        "Linear": deepctr_torch.models.dcn.LinearModel,
+        "Transformer": TransformerVoter
     }
     return models[model_type]
+class TransformerVoter(nn.Module):
+    pass
 
 def get_model(config, all_feature_columns, feature_names):
     CTRModel = get_ctr_model(config["model_type"])
