@@ -7,14 +7,11 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 from tqdm import tqdm
-from model import get_tokenizer
 
 from reddit import get_batch_submission_text, get_single_submission_text 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler
-from deepctr_torch.inputs import SparseFeat, VarLenSparseFeat, DenseFeat, get_feature_names
+from sklearn.preprocessing import LabelEncoder
 from superdebug import debug
 import os
 import pickle
@@ -268,14 +265,16 @@ def get_model_input(config):
     if config["save_and_load_prepared_data"] and os.path.exists(prepared_data_path):
         debug("Loading prepared data...")
         with open(prepared_data_path, "rb") as f:
-            target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info = pickle.load(f)
+            target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = pickle.load(f)
     else:
         debug("Preparing data...")
         all_data = sample_load_dataset(config["sample_ratio"], config["sample_method"])
         all_data["SUBMISSION_TEXT"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
         categorical_features, string_features, target = get_selected_feature(config)
+
         cleared_data = clean_data(all_data, categorical_features, string_features)
         featured_data, original_feature_map = transform_features(cleared_data, categorical_features, string_features, target)
+        num_all_users = len(set(featured_data["USERNAME"]))
         debug(featured_data=featured_data)
         # all_feature_columns, feature_names, max_voted_users = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)
         train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"], train_test_different_submissions = config["train_test_different_submissions"])
@@ -287,11 +286,11 @@ def get_model_input(config):
         # train_model_input, test_model_input = tokenize_submission_text(train_data, test_data, train_model_input, test_model_input, config)
         if config["save_and_load_prepared_data"]:
             with open(prepared_data_path, "wb") as f:
-                pickle.dump((target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info), f)
+                pickle.dump((target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users), f)
             debug(f"Prepared data saved to {prepared_data_path}")
-    return target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info
+    return target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users
 
 if __name__ == '__main__':
     config_path, config = parse_config()
-    target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info = get_model_input(config)
+    target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = get_model_input(config)
     debug(config_path=config_path)

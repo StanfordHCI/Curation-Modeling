@@ -73,22 +73,12 @@ def join_sets(sets):
         full_set.update(a_set)
     return full_set
     
-def check_model(model):
-    if "UPVOTED_USERS" in model.embedding_dict:
-        assert model.embedding_dict["UPVOTED_USERS"] == model.embedding_dict["USERNAME"]
-    if "DOWNVOTED_USERS" in model.embedding_dict:
-        assert model.embedding_dict["DOWNVOTED_USERS"] == model.embedding_dict["USERNAME"]
 def save_model(model, epoch, eval_acc, optim, save_dir, type = "latest"):
-    check_model(model)
     save_path = os.path.join(save_dir, f"{type}.pt")
     save_dict = {'epoch': epoch, 
 		'state_dict': model.state_dict(), 
 		'eval_acc': eval_acc,
 		'optimizer': optim.state_dict()}
-    # if "lm_encoder" in " ".join(list(model.state_dict().keys())):
-    #     debug("Model contains lm_encoder")
-    # else:
-    #     debug("Model doesn't contain lm_encoder")
     torch.save(save_dict, save_path)
 
 def load_model_dict(save_dir, type = "latest"):
@@ -107,7 +97,6 @@ def load_model(save_dir, model, optim, initial_epoch, best_eval_acc, type = "lat
         optim.load_state_dict(save_dict['optimizer'])
         initial_epoch = save_dict['epoch']
         best_eval_acc = save_dict['eval_acc']
-    check_model(model)
     return model, optim, initial_epoch, best_eval_acc, save_dict
 
 def print_log(log_path, *strs, **strss):
@@ -126,5 +115,5 @@ def to_device(device, to_float, *params):
         return batch_func(lambda x:x.to(device).float(), *params)
         # return (param.to(device).float() for param in params)
     else:
-        return batch_func(lambda x:x.to(device), *params)
+        return batch_func(lambda x:x.to(device) if x is not None else x, *params)
         # return (param.to(device) for param in params)

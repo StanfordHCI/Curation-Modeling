@@ -8,14 +8,14 @@ import sklearn
 import torch
 from superdebug import debug
 from sklearn.metrics import log_loss, roc_auc_score, accuracy_score
-from data import get_model_input
-from model import get_model
+from dynamic_data import get_data_loader
+from process_data import get_model_input
+from model import TransformerVoter, _accuracy_score
 from utils import get_config, load_model, save_model, to_device, parse_config
 from deepctr_torch.callbacks import ModelCheckpoint
 from deepctr_torch.layers.utils import slice_arrays
 from deepctr_torch.models.basemodel import BaseModel
 import torch.utils.data as Data
-from torch.utils.data import DataLoader
 from tensorflow.python.keras.callbacks import CallbackList
 from tqdm import tqdm
 import numpy as np
@@ -34,16 +34,15 @@ def get_normalization_weights(data:pd.DataFrame, config):
     return upvote_downvote_weights * user_weights
 
 def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
-    if metric_func != sklearn.metrics.accuracy_score and metric_func != BaseModel._accuracy_score:
+    if metric_func != sklearn.metrics.accuracy_score and metric_func != _accuracy_score:
         try:
             val = metric_func(y_true, y_pred, labels = [0,1], sample_weight=sample_weight)
         except Exception as e:
-            debug(e)
-            val = 1
+            val = None
     else:
         val = metric_func(y_true, y_pred, sample_weight=sample_weight)
     return val
-def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, max_voted_users=100, step_generator = False, n_step_per_sample = 1):
+def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, step_generator = False, n_step_per_sample = 1):
     """
     :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a dictionary mapping input names to Numpy arrays.
     :param y: Numpy array of target (label) data (if the model has a single output), or list of Numpy arrays (if the model has multiple outputs).
@@ -55,41 +54,16 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
     :param validation_data: tuple `(x_val, y_val)` or tuple `(x_val, y_val, val_sample_weights)` on which to evaluate the loss and any model metrics at the end of each epoch. The model will not be trained on this data. `validation_data` will override `validation_split`.
     :param shuffle: Boolean. Whether to shuffle the order of the batches at the beginning of each epoch.
     """
-    assert isinstance(x, dict)
     if step_generator: assert epochs == 1 and batch_size == 1
-    if model.lm_encoder is not None:
-        assert "input_ids" in x, "Make sure train_model_input contains tokenized reddit text"
-        text_input_ids = x["input_ids"]
-        text_token_type_ids = x["token_type_ids"] if "token_type_ids" in x else None
-        text_attention_mask = x["attention_mask"]
-    else:
-        text_input_ids, text_token_type_ids, text_attention_mask = None, None, None
-    if "UPVOTED_USERS" in x:
-        x["UPVOTED_USERS"] = pad_sequences(x["UPVOTED_USERS"], maxlen=max_voted_users, padding='post')
-        x["DOWNVOTED_USERS"] = pad_sequences(x["DOWNVOTED_USERS"], maxlen=max_voted_users, padding='post')
-    x = [x[feature] for feature in model.feature_index if feature in x] # turn into a list of numpy arrays
     do_validation = False
     if validation_split and 0. < validation_split < 1.:
         do_validation = True
-        if hasattr(x[0], 'shape'):
-            split_at = int(x[0].shape[0] * (1. - validation_split))
-        else:
-            split_at = int(len(x[0]) * (1. - validation_split))
-        x, val_x = slice_arrays(x, 0, split_at), slice_arrays(x, split_at)
-        y, val_y = slice_arrays(y, 0, split_at), slice_arrays(y, split_at)
+        split_at = int(len(data) * (1. - validation_split))
+        data, val_data = data.iloc[:split_at], data.iloc[split_at:]
         weights, val_weights = slice_arrays(weights, 0, split_at), slice_arrays(weights, split_at)
-        if model.lm_encoder is not None:
-            text_input_ids, val_text_input_ids = text_input_ids[:split_at], text_input_ids[split_at:]
-            text_token_type_ids, val_text_token_type_ids = (text_token_type_ids[:split_at], text_token_type_ids[split_at:]) if text_token_type_ids is not None else (torch.zeros([text_input_ids.shape[0], 0], dtype = int), torch.zeros([val_text_input_ids.shape[0], 0], dtype = int))
-            text_attention_mask, val_text_attention_mask = text_attention_mask[:split_at], text_attention_mask[split_at:]
-        else:
-            val_text_input_ids, val_text_token_type_ids, val_text_attention_mask = None, None, None
     else:
-        val_x, val_y, val_weights, val_text_input_ids, val_text_token_type_ids, val_text_attention_mask = [], [], [], [], [], []
-    for i in range(len(x)):
-        if len(x[i].shape) == 1:
-            x[i] = np.expand_dims(x[i], axis=1)
-    train_tensor_data, train_loader = get_data_loader(model.lm_encoder is not None, x, text_input_ids,text_token_type_ids,text_attention_mask, y, weights, shuffle=shuffle, batch_size=batch_size)
+        val_data, val_weights = [], []
+    trainset, train_loader = get_data_loader(config, data, model.tokenizer, categorical_features, string_features, target, weights, shuffle=shuffle, batch_size=batch_size)
 
     model = model.train()
     loss_func = model.loss_func
@@ -105,13 +79,12 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
     else:
         _model = model
 
-    sample_num = len(train_tensor_data)
+    sample_num = len(trainset)
     steps_per_epoch = (sample_num - 1) // batch_size + 1
     # Train
     if not step_generator:
-        print("Train on {0} samples, validate on {1} samples, {2} steps per epoch".format(len(train_tensor_data), len(val_y), steps_per_epoch))
+        print("Train on {0} samples, validate on {1} samples, {2} steps per epoch".format(len(trainset), len(val_data), steps_per_epoch))
     for epoch in range(initial_epoch, epochs):
-        # epoch_logs = {}
         start_time = time.time()
         loss_epoch = 0
         total_loss_epoch = 0
@@ -119,16 +92,19 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
         if not step_generator:
             train_loader = tqdm(train_loader, total = steps_per_epoch, desc = "Training")
         for _, train_input in enumerate(train_loader):
-            x, y, weight = convert_CTR_model_input(model, train_input, sample_voted_users=config["sample_part_voted_users"], add_target_user_ratio = config["add_target_user_ratio"])
-            # debug(x=x[0], y = y[0])
+            # x, y, weight = convert_CTR_model_input(model, train_input, sample_voted_users=config["sample_part_voted_users"], add_target_user_ratio = config["add_target_user_ratio"])
+            input_ids, token_type_ids, attention_mask, label, weight = train_input
+            # x, _y, weight = convert_CTR_model_input(model, test_input, sample_voted_users=sample_voted_users)
+            input_ids, token_type_ids, attention_mask, label, weight = to_device(model.device, False, input_ids, token_type_ids, attention_mask, label.float(), weight)
             for _step_i in range(n_step_per_sample):
-                y_pred = _model(x)
+                y_pred = _model(input_ids, token_type_ids, attention_mask)
 
                 optim.zero_grad()
-                loss = loss_func(y_pred.reshape(y.shape), y, weight = weight.reshape(y.shape), reduction='sum')
-                reg_loss = model.get_regularization_loss()
+                loss = loss_func(y_pred.reshape(label.shape), label, weight = weight.reshape(label.shape), reduction='sum')
+                # reg_loss = model.get_regularization_loss()
 
-                total_loss = loss + reg_loss + model.aux_loss
+                # total_loss = loss + reg_loss + model.aux_loss
+                total_loss = loss
 
                 loss_epoch += loss.item()
                 total_loss_epoch += total_loss.item()
@@ -139,21 +115,14 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
                 for name, metric_func in model.metrics.items():
                     if name not in train_result:
                         train_result[name] = []
-                    metric_result = apply_metric(metric_func, y.cpu().numpy(), y_pred.reshape(y.shape).cpu().data.numpy())
-                    train_result[name].append(metric_result)
+                    metric_result = apply_metric(metric_func, label.cpu().numpy(), y_pred.reshape(label.shape).cpu().data.numpy())
+                    if metric_result is not None: train_result[name].append(metric_result)
             if step_generator:
                 yield model
 
         if not step_generator:
-            # Add epoch_logs
-            # epoch_logs["loss"] = total_loss_epoch / sample_num
-            # for name, result in train_result.items():
-                # epoch_logs[name] = np.sum(result) / steps_per_epoch
-
             if do_validation:
-                eval_result = evaluate_model(model, val_x, val_text_input_ids, val_text_token_type_ids, val_text_attention_mask, val_y, weights = val_weights, batch_size=batch_size)
-                # for name, result in eval_result.items():
-                #     epoch_logs["val_" + name] = result
+                eval_result = evaluate_model(config, model, val_data, weights = val_weights, batch_size=batch_size)
                 best_eval_acc = max(best_eval_acc, eval_result["acc_with_weight"])
             # verbose
             if verbose > 0:
@@ -164,7 +133,7 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
                     eval_str += " - " + name + ": {0: .4f}".format(np.sum(result) / steps_per_epoch)
                 if do_validation:
                     for name, result in eval_result.items():
-                        eval_str += " - " + "val_" + name + ": {0: .4f}".format(result)
+                        eval_str += " - " + "val_" + name + (": {0: .4f}".format(result) if result is not None else ": N/A")
                 print(eval_str)
                 with open(config["log_path"], 'a') as log:
                     log.write(eval_str+"\n")
@@ -172,6 +141,8 @@ def train_model(config, model, x=None, y=None, weights=None, batch_size=256, epo
             if best_eval_acc == eval_result["acc_with_weight"]:
                 save_model(model, epoch, eval_result["acc_with_weight"], optim, config["save_model_dir"], "best")
     yield None
+
+"""
 def modify_updown_voted_users(x:torch.tensor, y:torch.tensor, model, vote = "upvote", sample_voted_users = False, add_target_user_ratio = 0, interactive = False):
     if x is None: return None
     updown_voted_users_batch_orig = x[:,model.feature_index[f"{vote.upper()}D_USERS"][0]:model.feature_index[f"{vote.upper()}D_USERS"][1]]
@@ -215,6 +186,7 @@ def modify_updown_voted_users(x:torch.tensor, y:torch.tensor, model, vote = "upv
     x_new = x.clone()
     x_new[:, model.feature_index[f"{vote.upper()}D_USERS"][0]:model.feature_index[f"{vote.upper()}D_USERS"][1]] = updown_voted_users_batch
     return x_new
+
 def convert_CTR_model_input(model, dataloader_input, sample_voted_users = False, add_target_user_ratio = 0, interactive = False):
     if model.lm_encoder is not None:
         (x, y, weight, text_input_ids, text_token_type_ids, text_attention_mask) = dataloader_input
@@ -232,42 +204,22 @@ def convert_CTR_model_input(model, dataloader_input, sample_voted_users = False,
     if model.lm_encoder is not None:
         x = torch.cat([x, encoder_hidden_pooled], dim = -1)
     return x,y,weight
+"""
 
-def get_data_loader(has_lm_encoder, x, text_input_ids,text_token_type_ids,text_attention_mask, y, weights = None, shuffle=True, batch_size=256):
-    if weights is None:
-        weights = np.zeros(y.shape, dtype = float)
-    if text_token_type_ids is None and text_input_ids is not None:
-        text_token_type_ids = torch.zeros([text_input_ids.shape[0], 0], dtype = int)
-    if has_lm_encoder:
-        tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights),text_input_ids,text_token_type_ids,text_attention_mask)
-    else:
-        tensor_data = Data.TensorDataset(torch.from_numpy(np.concatenate(x, axis=-1)),torch.from_numpy(y), torch.from_numpy(weights))
 
-    if torch.isnan(tensor_data.tensors[0]).any(): raise ValueError('nan')
-    data_loader = DataLoader(dataset=tensor_data, shuffle=shuffle, batch_size=batch_size)
-    return tensor_data, data_loader
-
-def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention_mask, y, data=None, weights = None, batch_size=256, sample_voted_users=False, max_voted_users=100, return_prediction = False, data_info = None, disable_tqdm = False):
+def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=256, shuffle = True, return_prediction = False, sample_voted_users = False, data_info = None, disable_tqdm = False):
     model = model.eval()
-    if isinstance(x, dict):
-        if "UPVOTED_USERS" in x:
-            x["UPVOTED_USERS"] = pad_sequences(x["UPVOTED_USERS"], maxlen=max_voted_users, padding='post')
-            x["DOWNVOTED_USERS"] = pad_sequences(x["DOWNVOTED_USERS"], maxlen=max_voted_users, padding='post')
-        x = [x[feature] for feature in model.feature_index if feature in x]
-    
-    for i in range(len(x)):
-        if len(x[i].shape) == 1:
-            x[i] = np.expand_dims(x[i], axis=1)
-
-    tensor_data, test_loader = get_data_loader(model.lm_encoder is not None, x, text_input_ids,text_token_type_ids,text_attention_mask, y, weights, shuffle=False, batch_size=batch_size)
+    testset, test_loader = get_data_loader(config, data, model.tokenizer, categorical_features, string_features, target, weights, sample_voted_users=sample_voted_users, shuffle=shuffle, batch_size=batch_size)
     pred_ans = []
 
     if not disable_tqdm:
         test_loader = tqdm(test_loader)
     with torch.no_grad():
         for _, test_input in enumerate(test_loader):
-            x, _y, weight = convert_CTR_model_input(model, test_input, sample_voted_users=sample_voted_users)
-            y_pred = model(x).cpu().data.numpy()  # .squeeze()
+            input_ids, token_type_ids, attention_mask, label, weight = test_input
+            # x, _y, weight = convert_CTR_model_input(model, test_input, sample_voted_users=sample_voted_users)
+            input_ids, token_type_ids, attention_mask, label, weight = to_device(model.device, False, input_ids, token_type_ids, attention_mask, label.float(), weight)
+            y_pred = model(input_ids, token_type_ids, attention_mask).cpu().data.numpy()  # .squeeze()
             pred_ans.append(y_pred)
 
     pred_ans =  np.concatenate(pred_ans).astype("float64")
@@ -275,31 +227,32 @@ def evaluate_model(model, x, text_input_ids, text_token_type_ids, text_attention
         return pred_ans
 
     if data_info is not None:
-        test_filter = {"": (y >=-1).squeeze(), "_train_user_votes_num>=3": data_info["train_user_votes_num"] >= 3, "_train_submission_votes_num>=3": data_info["train_submission_votes_num"] >= 3, "_train_user_votes_num<=3": data_info["train_user_votes_num"] <= 3, "_train_submission_votes_num<=3": data_info["train_submission_votes_num"] <= 3} 
+        test_filter = {"": (data["VOTE"] >=-1).to_numpy(), "_train_user_votes_num>=3": data_info["train_user_votes_num"] >= 3, "_train_submission_votes_num>=3": data_info["train_submission_votes_num"] >= 3, "_train_user_votes_num<=3": data_info["train_user_votes_num"] <= 3, "_train_submission_votes_num<=3": data_info["train_submission_votes_num"] <= 3} 
     else:
-        test_filter = {"": (y >=-1).squeeze()}
+        test_filter = {"": (data["VOTE"] >=-1).to_numpy()}
+    ground_truth = data["VOTE"].to_numpy()
     eval_result = OrderedDict()
     for wei in [None, weights]:
         for filter_name in test_filter:
             filter = test_filter[filter_name]
             eval_result[f"{filter_name}{'_with_weight' if wei is not None else ''}"] = 0
             for name, metric_func in model.metrics.items():
-                if 0 not in y[filter].shape:
-                    eval_result[f"{name}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[filter], pred_ans[filter], sample_weight=wei[filter] if wei is not None else None)
+                if 0 not in ground_truth[filter].shape:
+                    eval_result[f"{name}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, ground_truth[filter], pred_ans[filter], sample_weight=wei[filter] if wei is not None else None)
                 if data is not None:
                     for vote in [0, 1]:
-                        if 0 not in y[(data["VOTE"] == vote).to_numpy() * filter].shape:
-                            eval_result[f"{name}_vote_{vote}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, y[(data["VOTE"] == vote).to_numpy() * filter], pred_ans[(data["VOTE"] == vote).to_numpy() * filter], sample_weight=wei[(data["VOTE"] == vote).to_numpy() * filter] if wei is not None else None)
+                        if 0 not in ground_truth[(data["VOTE"] == vote).to_numpy() * filter].shape:
+                            eval_result[f"{name}_vote_{vote}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, ground_truth[(data["VOTE"] == vote).to_numpy() * filter], pred_ans[(data["VOTE"] == vote).to_numpy() * filter], sample_weight=wei[(data["VOTE"] == vote).to_numpy() * filter] if wei is not None else None)
     model = model.train()
     return eval_result
 
 
 if __name__ == "__main__":
     config_path, config = parse_config()
-    all_feature_columns, target, train_model_input, test_model_input, feature_names, original_feature_map, max_voted_users, train_data, test_data, test_data_info = get_model_input(config)
-    model = get_model(config, all_feature_columns, feature_names)
+    target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = get_model_input(config)
+    model = TransformerVoter(config, categorical_features, string_features, original_feature_map, num_all_users=num_all_users)
     train_weights = get_normalization_weights(train_data, config)
-    next(train_model(config, model, x=train_model_input, y=train_data[target].values, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2, max_voted_users=max_voted_users))
+    next(train_model(config, model, train_data, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2))
 
     model_types = ["latest", "best"]
     for model_type in model_types:
@@ -307,14 +260,14 @@ if __name__ == "__main__":
         test_weights = get_normalization_weights(test_data, config)
         if config["use_voted_users_feature"]:
             debug("Use all voted users as feature")
-        eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'], max_voted_users=max_voted_users,sample_voted_users=False, data_info = test_data_info)
+        eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=False, data_info = test_data_info)
         debug(eval_all_test_data=str(eval_all_test_data))
         with open(config["log_path"], 'a') as log:
             log.write(f"Evaluation result of the {model_type} model (use all voted users as feature):" + str(eval_all_test_data)+"\n")
 
         if config["use_voted_users_feature"] and config["sample_part_voted_users"]:
             debug("Sample part voted users as feature")
-            eval_all_test_data = evaluate_model(model, test_model_input, test_model_input.get("input_ids", None), test_model_input.get("token_type_ids", None), test_model_input.get("attention_mask", None), test_data[target].values, data = test_data, weights = test_weights, batch_size=config['batch_size'],max_voted_users=max_voted_users, sample_voted_users=True, data_info = test_data_info)
+            eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=True, data_info = test_data_info)
             debug(eval_all_test_data=str(eval_all_test_data))
             with open(config["log_path"], 'a') as log:
                 log.write(f"Evaluation result of the {model_type} model (sample part voted users as feature):" + str(eval_all_test_data)+"\n")
