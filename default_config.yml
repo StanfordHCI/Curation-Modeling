@@ -14,9 +14,9 @@ user_normalization: equal # null for no normalization, equal for assigning user 
 # data processing
 save_and_load_prepared_data: True
 sample_ratio: 1
-sample_method: ['most_votes'] # , "equal_up_down_votes"
-categorical_features: ['USERNAME', 'SUBREDDIT', 'AUTHOR'] # 'SUBMISSION_ID' #! make sure "USERNAME" is the first one
-string_features: ["CREATED_TIME", 'NSFW', "SUBMISSION_TEXT"]
+sample_method: ['most_votes'] # , "equal_up_down_votes", "add_weak_downvote"
+categorical_features: ['USERNAME', 'AUTHOR'] # 'SUBMISSION_ID' #! make sure "USERNAME" is the first one
+string_features: ['SUBREDDIT', "CREATED_TIME", 'NSFW', "SUBMISSION_TEXT"]
 use_voted_users_feature: True # will add "UPVOTED_USERS" and "DOWNVOTED_USERS"
 sample_part_voted_users: True
 add_target_user_ratio: 0.35

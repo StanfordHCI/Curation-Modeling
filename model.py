@@ -140,7 +140,7 @@ def get_tokenizer(config, categorical_features, string_features, original_featur
     tokenizer = AutoTokenizer.from_pretrained(config["language_model_encoder_name"], use_fast=True)
     
     debug(original_token_num = len(tokenizer))
-    new_tokens = []
+    new_tokens = ["[SEP]"]
     for feat in categorical_features + string_features:
         new_tokens.append(f"[{feat}]")
     for feat in original_feature_map:

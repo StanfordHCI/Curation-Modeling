@@ -67,6 +67,7 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
 
     if type(sample_method) == str:
         sample_method = [sample_method]
+    assert not (("equal_up_down_votes" in sample_method) and ("add_weak_downvote" in sample_method))
     selected_entries = None
     if sample_ratio < 1:
         if "most_votes" in sample_method:
@@ -99,34 +100,66 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
         vote_data = vote_data[vote_data[sample_column].isin(selected_entries)] 
         debug(vote_data_num = len(vote_data))
 
-    # For each user, sample upvote:downvote = 1:1
-    if "equal_up_down_votes" in sample_method:
-        debug(f"Sampling so that upvote:downvote = 1:1")
+    if "equal_up_down_votes" in sample_method or "add_weak_downvote" in sample_method:
+        vote_data = vote_data.sort_values(by=['CREATED_TIME']).reset_index(drop = True)
         if sample_column == "USERNAME":
             selected_usernames = selected_entries
         else:
             selected_usernames = set(vote_data["USERNAME"])
-
-        random.seed(42)
         user_votes_indices = defaultdict(list)
         usernames = vote_data["USERNAME"]
         votes = vote_data["VOTE"]
-        for index in tqdm(vote_data.index): user_votes_indices[f'{usernames[index]}-{votes[index]}'].append(index)
-        vote_data_indices = []
-        for username in tqdm(selected_usernames):
-            upvote_indices = user_votes_indices[f'{username}-upvote']
-            downvote_indices = user_votes_indices[f'{username}-downvote']
-            upvote_num = len(upvote_indices)
-            downvote_num = len(downvote_indices)
-            if downvote_num < upvote_num:
-                upvote_indices = random.sample(upvote_indices, downvote_num)
-            elif upvote_num < downvote_num:
-                downvote_indices = random.sample(downvote_indices, upvote_num)
-            vote_data_indices.extend(upvote_indices)
-            vote_data_indices.extend(downvote_indices)
-        vote_data_indices = set(vote_data_indices)
-        vote_data = vote_data[vote_data.index.isin(vote_data_indices)]
+        submission_ids = vote_data["SUBMISSION_ID"]
+        for index in tqdm(vote_data.index): 
+            user_votes_indices[f'{usernames[index]}-{votes[index]}'].append(index if "equal_up_down_votes" in sample_method else submission_ids[index])
 
+        random.seed(42)
+        # For each user, sample upvote:downvote = 1:1
+        if "equal_up_down_votes" in sample_method:
+            debug(f"Sampling so that for each user, upvote:downvote = 1:1")
+            vote_data_indices = []
+            for username in tqdm(selected_usernames):
+                upvote_indices = user_votes_indices[f'{username}-upvote']
+                downvote_indices = user_votes_indices[f'{username}-downvote']
+                upvote_num = len(upvote_indices)
+                downvote_num = len(downvote_indices)
+                if downvote_num < upvote_num:
+                    upvote_indices = random.sample(upvote_indices, downvote_num)
+                elif upvote_num < downvote_num:
+                    downvote_indices = random.sample(downvote_indices, upvote_num)
+                vote_data_indices.extend(upvote_indices)
+                vote_data_indices.extend(downvote_indices)
+            vote_data = vote_data[vote_data.index.isin(set(vote_data_indices))]
+        # add random unvoted data within 12 hours as weak downvotes
+        if "add_weak_downvote" in sample_method:
+            vote_data_list = [vote_data]
+            created_times = vote_data[["CREATED_TIME", "SUBMISSION_ID"]]
+            created_times = created_times.drop_duplicates(subset = "SUBMISSION_ID")
+            created_times.loc[:, "CREATED_TIME"] = created_times["CREATED_TIME"].fillna(0) # TODO: so slow! change to first calculate the nearby times of created_times
+            created_times.loc[:, "ORDER"] = list(range(len(created_times)))
+            for username in tqdm(selected_usernames):
+                upvote_sub_ids = user_votes_indices[f'{username}-upvote']
+                downvote_sub_ids = user_votes_indices[f'{username}-downvote']
+                upvote_num = len(upvote_sub_ids)
+                downvote_num = len(downvote_sub_ids)
+                if downvote_num < upvote_num:
+                    upvote_time = created_times[created_times["SUBMISSION_ID"].isin(upvote_sub_ids)]
+                    upvoted_time_orders = set(upvote_time["ORDER"])
+                    weak_downvote_time_a = created_times[(created_times["ORDER"] + 1).isin(upvoted_time_orders)]
+                    weak_downvote_a_created_time = weak_downvote_time_a["CREATED_TIME"].to_numpy(float)
+                    weak_downvote_time_a.loc[:, "TIME_DIFF"] = abs(weak_downvote_a_created_time - upvote_time["CREATED_TIME"].to_numpy(float)[-len(weak_downvote_a_created_time):])
+                    weak_downvote_time_b = created_times[(created_times["ORDER"] - 1).isin(upvoted_time_orders)]
+                    weak_downvote_b_created_time = weak_downvote_time_b["CREATED_TIME"].to_numpy(float)
+                    weak_downvote_time_b.loc[:, "TIME_DIFF"] = abs(weak_downvote_b_created_time - upvote_time["CREATED_TIME"].to_numpy(float)[:len(weak_downvote_b_created_time)])
+                    weak_downvote_time = pd.concat([weak_downvote_time_a, weak_downvote_time_b], axis = 0)
+                    weak_downvote_time = weak_downvote_time[~weak_downvote_time["SUBMISSION_ID"].isin(upvote_sub_ids)]
+                    weak_downvote_time = weak_downvote_time[weak_downvote_time["TIME_DIFF"] <= 43200].sort_values(by = ["TIME_DIFF"], ascending=True) # within 12 hours
+                    weak_downvote_time_index = set(weak_downvote_time.index.to_list()[:upvote_num - downvote_num])
+                    weak_downvote_data = vote_data[vote_data.index.isin(weak_downvote_time_index)]
+                    weak_downvote_data.loc[:, "USERNAME"] = username
+                    weak_downvote_data.loc[:, "VOTE"] = "weak_downvote"
+                    vote_data_list.append(weak_downvote_data)
+            vote_data = pd.concat(vote_data_list, axis = 0)
 
     submission_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t') # each submission is a separate post and have a forest of comments
     # SUBMISSION_ID	SUBREDDIT	TITLE	AUTHOR	#_COMMENTS	NSFW	SCORE	UPVOTED_%	LINK
@@ -139,8 +172,6 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
     submission_data['LINK'] = ["https://www.reddit.com" + link if link.startswith('/r/') else link for link in submission_data['LINK']]
 
     all_data = vote_data.merge(submission_data, on=['SUBMISSION_ID', 'SUBREDDIT'], how='inner')
-    for vote in all_data['VOTE']:
-        assert vote == 'upvote' or vote == 'downvote', f'Vote {vote} is invalid'
     return all_data
 
 def get_selected_feature(config):
@@ -164,7 +195,10 @@ def transform_features(data, categorical_features, string_features, target):
         if feature_name in data:
             lbe = LabelEncoder()
             original_features = data[feature_name]
-            data[feature_name] = lbe.fit_transform(original_features)
+            if feature_name != "VOTE":
+                data[feature_name] = lbe.fit_transform(original_features)
+            else:
+                data["VOTE"] = data["VOTE"].map({"upvote":1.0, "downvote": 0.0, "weak_downvote": 0.3})
             for i, transformed_feature in enumerate(data[feature_name]):
                 if transformed_feature not in original_feature_map[feature_name]:
                     original_feature_map[feature_name][transformed_feature] = original_features[i]
@@ -176,6 +210,8 @@ def transform_features(data, categorical_features, string_features, target):
     # dense_features = [feat for feat in dense_features if feat in data]
     # data[dense_features] = mms.fit_transform(data[dense_features])
     return data, original_feature_map
+
+
 """
 def get_feature_columns(data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features):
     sparse_feature_columns = [SparseFeat(feat, vocabulary_size=(data[feat].nunique() if feat in data else 1),embedding_dim=sparse_features_embed_dims[feat]) for i,feat in enumerate(sparse_features)] # count #unique features for each sparse field, transform sparse features into dense vectors by embedding techniques
@@ -221,6 +257,9 @@ def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0, train_t
                     else:
                         test_data.append(vote_data)
         train_data = pd.DataFrame(train_data); test_data = pd.DataFrame(test_data)
+    test_data_weak_downvote = test_data[test_data["VOTE"] == 0.3]
+    test_data = test_data[test_data["VOTE"] != 0.3]
+    train_data = pd.concat([train_data, test_data_weak_downvote], axis = 0)
     if len(train_data) == 0:
         train_data = data.iloc[0:10]
     if len(test_data) == 0:
