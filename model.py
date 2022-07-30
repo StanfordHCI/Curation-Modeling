@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from transformers import AutoModel, AutoTokenizer, ElectraTokenizerFast
+from transformers import AutoModel, AutoTokenizer, ElectraTokenizerFast, BertConfig, BertModel
 from utils import load_model
 import torch.nn.functional as F
 import torch.nn as nn
@@ -35,25 +35,69 @@ class PredictionLayer(nn.Module):
 """
 
 class TransformerVoter(nn.Module):
-    def __init__(self, config, categorical_features, string_features, original_feature_map, num_all_users = 0, task = "binary"):
+    def __init__(self, config, categorical_features, string_features, original_feature_map, num_all_users = 0, task = "binary", simple = False):
         super(TransformerVoter, self).__init__()
         self.device = config["device"]
         self.gpus = config["gpus"]
         if self.gpus and str(self.gpus[0]) not in self.device:
             raise ValueError("`gpus[0]` should be the same gpu with `device`")
-        self.lm_encoder = AutoModel.from_pretrained(config["language_model_encoder_name"])
+        self.simple = simple
+        if simple:
+            assert string_features == []
+            self.fcn = nn.Linear(2*len(categorical_features)*config["encoder_hidden_dim"], config["encoder_hidden_dim"])
+        # self.lm_encoder = AutoModel.from_pretrained(config["language_model_encoder_name"])
+        lm_config = BertConfig(num_attention_heads=1, intermediate_size = config["encoder_hidden_dim"], hidden_size=config["encoder_hidden_dim"], num_hidden_layers=1)
+        self.lm_encoder = BertModel(lm_config)
         self.tokenizer = get_tokenizer(config, categorical_features, string_features, original_feature_map, config["use_voted_users_feature"], num_all_users)
         self.lm_encoder.resize_token_embeddings(len(self.tokenizer))
         self.prediction_head = nn.Linear(config["encoder_hidden_dim"], 1)
+        self.regularization_weight = []
+        self.add_regularization_weight(self.lm_encoder.parameters(), l2=config["l2_normalization"])
+        self.add_regularization_weight(self.prediction_head.parameters(), l2=config["l2_normalization"])
         self.to(self.device)
         self.compile(torch.optim.Adam(self.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
 
     def forward(self, input_ids, token_type_ids, attention_mask):
-        encoder_hidden = self.lm_encoder(input_ids = input_ids, token_type_ids = token_type_ids, attention_mask = attention_mask).last_hidden_state
-        # encoder_hidden_pooled = (attention_mask[:,:,None] * encoder_hidden).sum(axis=1) / attention_mask.sum(axis = 1, keepdim = True)
-        target_user_hidden = encoder_hidden[:, 2, :] # [bsz, hidden_size], 2 is for the USER_i
-        logits = self.prediction_head(target_user_hidden)
+        if not self.simple:
+            encoder_out = self.lm_encoder(input_ids = input_ids, token_type_ids = token_type_ids, attention_mask = attention_mask).last_hidden_state
+            target_hidden = encoder_out[:, 2, :] # [bsz, hidden_size], 2 is for the USER_i
+        else:
+            token_embeddings = self.lm_encoder.embeddings(input_ids = input_ids, token_type_ids = token_type_ids)
+            token_embeddings = token_embeddings[:, 1:-1, :].reshape(token_embeddings.shape[0], -1)
+            target_hidden = self.fcn(token_embeddings)
+            target_hidden = F.gelu(target_hidden)
+        # encoder_out_pooled = (attention_mask[:,:,None] * encoder_out).sum(axis=1) / attention_mask.sum(axis = 1, keepdim = True)
+        logits = self.prediction_head(target_hidden)
         return torch.sigmoid(logits) # [bsz, 1]
+    
+    def add_regularization_weight(self, weight_list, l1=0.0, l2=0.0):
+        # For a Parameter, put it in a list to keep Compatible with get_regularization_loss()
+        if isinstance(weight_list, torch.nn.parameter.Parameter):
+            weight_list = [weight_list]
+        # For generators, filters and ParameterLists, convert them to a list of tensors to avoid bugs.
+        # e.g., we can't pickle generator objects when we save the model.
+        else:
+            weight_list = list(weight_list)
+        self.regularization_weight.append((weight_list, l1, l2))
+
+    def get_regularization_loss(self, ):
+        total_reg_loss = torch.zeros((1,), device=self.device)
+        for weight_list, l1, l2 in self.regularization_weight:
+            for w in weight_list:
+                if isinstance(w, tuple):
+                    parameter = w[1]  # named_parameters
+                else:
+                    parameter = w
+                if l1 > 0:
+                    total_reg_loss += torch.sum(l1 * torch.abs(parameter))
+                if l2 > 0:
+                    try:
+                        total_reg_loss += torch.sum(l2 * torch.square(parameter))
+                    except AttributeError:
+                        total_reg_loss += torch.sum(l2 * parameter * parameter)
+
+        return total_reg_loss
+
     def compile(self, optimizer, loss=None, metrics=None):
         """
         :param optimizer: String (name of optimizer) or optimizer instance. See [optimizers](https://pytorch.org/docs/stable/optim.html).

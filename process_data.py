@@ -1,6 +1,8 @@
 import argparse
 from collections import Counter, OrderedDict, defaultdict
 import random
+import re
+import time
 from typing import Union
 import warnings
 from matplotlib import pyplot as plt
@@ -133,33 +135,43 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
         # add random unvoted data within 12 hours as weak downvotes
         if "add_weak_downvote" in sample_method:
             vote_data_list = [vote_data]
-            created_times = vote_data[["CREATED_TIME", "SUBMISSION_ID"]]
-            created_times = created_times.drop_duplicates(subset = "SUBMISSION_ID")
-            created_times.loc[:, "CREATED_TIME"] = created_times["CREATED_TIME"].fillna(0) # TODO: so slow! change to first calculate the nearby times of created_times
-            created_times.loc[:, "ORDER"] = list(range(len(created_times)))
+            created_times_data = vote_data[["CREATED_TIME", "SUBMISSION_ID"]]
+            created_times_data = created_times_data.drop_duplicates(subset = "SUBMISSION_ID")
+            created_times_data.loc[:, "CREATED_TIME"] = created_times_data["CREATED_TIME"].fillna(0) # TODO: so slow! change to first calculate the nearby times of created_times
+            # created_times_data.loc[:, "ORDER"] = list(range(len(created_times_data)))
+
+            created_times = created_times_data["CREATED_TIME"].to_list()
+            created_time_indices = created_times_data.index.to_list()
+
+            nearby_time_before = [-999999999] + created_times[:-1]
+            nearby_time_before_indices = [-1] + created_time_indices[:-1]
+            # nearby_time_before_indices = [idx if abs(nearby_time_before[i] - created_times[i])  <= 43200 else -1 for i,idx in enumerate(nearby_time_before_indices)] # TODO: add back time filtering
+            created_times_data.loc[:, "NEARBY_TIME_BEFORE_INDICES"] = nearby_time_before_indices
+
+            nearby_time_after = [-999999999] + created_times[:-1]
+            nearby_time_after_indices = [-1] + created_time_indices[:-1]
+            # nearby_time_after_indices = [idx if abs(nearby_time_after[i] - created_times[i])  <= 43200 else -1 for i,idx in enumerate(nearby_time_after_indices)] # TODO: add back time filtering
+            created_times_data.loc[:, "NEARBY_TIME_AFTER_INDICES"] = nearby_time_after_indices
+
             for username in tqdm(selected_usernames):
                 upvote_sub_ids = user_votes_indices[f'{username}-upvote']
                 downvote_sub_ids = user_votes_indices[f'{username}-downvote']
                 upvote_num = len(upvote_sub_ids)
                 downvote_num = len(downvote_sub_ids)
                 if downvote_num < upvote_num:
-                    upvote_time = created_times[created_times["SUBMISSION_ID"].isin(upvote_sub_ids)]
-                    upvoted_time_orders = set(upvote_time["ORDER"])
-                    weak_downvote_time_a = created_times[(created_times["ORDER"] + 1).isin(upvoted_time_orders)]
-                    weak_downvote_a_created_time = weak_downvote_time_a["CREATED_TIME"].to_numpy(float)
-                    weak_downvote_time_a.loc[:, "TIME_DIFF"] = abs(weak_downvote_a_created_time - upvote_time["CREATED_TIME"].to_numpy(float)[-len(weak_downvote_a_created_time):])
-                    weak_downvote_time_b = created_times[(created_times["ORDER"] - 1).isin(upvoted_time_orders)]
-                    weak_downvote_b_created_time = weak_downvote_time_b["CREATED_TIME"].to_numpy(float)
-                    weak_downvote_time_b.loc[:, "TIME_DIFF"] = abs(weak_downvote_b_created_time - upvote_time["CREATED_TIME"].to_numpy(float)[:len(weak_downvote_b_created_time)])
-                    weak_downvote_time = pd.concat([weak_downvote_time_a, weak_downvote_time_b], axis = 0)
-                    weak_downvote_time = weak_downvote_time[~weak_downvote_time["SUBMISSION_ID"].isin(upvote_sub_ids)]
-                    weak_downvote_time = weak_downvote_time[weak_downvote_time["TIME_DIFF"] <= 43200].sort_values(by = ["TIME_DIFF"], ascending=True) # within 12 hours
-                    weak_downvote_time_index = set(weak_downvote_time.index.to_list()[:upvote_num - downvote_num])
-                    weak_downvote_data = vote_data[vote_data.index.isin(weak_downvote_time_index)]
+                    upvote_data = created_times_data[created_times_data["SUBMISSION_ID"].isin(upvote_sub_ids)]
+                    nearby_time_indices = set()
+                    nearby_time_indices.update(set(upvote_data["NEARBY_TIME_BEFORE_INDICES"]))
+                    nearby_time_indices.update(set(upvote_data["NEARBY_TIME_AFTER_INDICES"]))
+                    nearby_time_indices = list(nearby_time_indices - {-1})
+                    # nearby_time_indices = random.sample(nearby_time_indices, min(len(nearby_time_indices), upvote_num - downvote_num))  # TODO: do sample
+                    weak_downvote_data = vote_data[vote_data.index.isin(nearby_time_indices)]
                     weak_downvote_data.loc[:, "USERNAME"] = username
-                    weak_downvote_data.loc[:, "VOTE"] = "weak_downvote"
+                    weak_downvote_data.loc[:, "VOTE"] = "downvote" # TODO: weak_downvote
                     vote_data_list.append(weak_downvote_data)
+            debug(original_vote_data_len = len(vote_data), original_upvote_data_len = sum([len(user_votes_indices[key]) if key.endswith("upvote") else 0 for key in user_votes_indices]), original_downvote_data_len = sum([len(user_votes_indices[key]) if key.endswith("downvote") else 0 for key in user_votes_indices]))
             vote_data = pd.concat(vote_data_list, axis = 0)
+            debug(new_vote_data_len = len(vote_data))
 
     submission_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t') # each submission is a separate post and have a forest of comments
     # SUBMISSION_ID	SUBREDDIT	TITLE	AUTHOR	#_COMMENTS	NSFW	SCORE	UPVOTED_%	LINK
@@ -182,9 +194,13 @@ def get_selected_feature(config):
     return categorical_features, string_features, target
 
 def clean_data(data:pd.DataFrame, categorical_features, string_features):
-    data["NSFW"] = data["NSFW"].map({"NSFW":"true", "": "false", np.nan: "false", None: "false"})
     categorical_features = [feat for feat in categorical_features if feat in data]
     string_features = [feat for feat in string_features if feat in data]
+    if "NSFW" in string_features:
+        data["NSFW"] = data["NSFW"].map({"NSFW":"true", "": "false", np.nan: "false", None: "false"})
+    if "CREATED_TIME" in string_features:
+        data['CREATED_TIME']=data['CREATED_TIME'].map(lambda x: re.sub("[0-9][0-9]:[0-9][0-9]:[0-9][0-9] ", "", time.ctime(x)), na_action = 'ignore')
+        data['CREATED_TIME'] = data['CREATED_TIME'].fillna("")
     data[categorical_features] = data[categorical_features].fillna('n/a')
     data[string_features] = data[string_features].fillna("")
     return data
@@ -305,6 +321,7 @@ def get_model_input(config):
         debug("Loading prepared data...")
         with open(prepared_data_path, "rb") as f:
             target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = pickle.load(f)
+        categorical_features, string_features, target = get_selected_feature(config)
     else:
         debug("Preparing data...")
         all_data = sample_load_dataset(config["sample_ratio"], config["sample_method"])

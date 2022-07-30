@@ -88,7 +88,7 @@ class RedditDataset(Dataset):
                 for user in updown_voted_users:
                     strings.append(f"USERNAME_{user}")
         input_string = " ".join(strings)
-        if self.weight is not None:
+        if self.weight is None:
             weight = 1.0
         else:
             weight = self.weight[idx]
@@ -114,7 +114,7 @@ class CollateFN:
         # features.float(), labels.long(), lengths.long()
 
 def get_data_loader(config, data:pd.DataFrame, tokenizer, categorical_features, string_features, target, weight = None, interactive = False, sample_voted_users = True, shuffle=True, batch_size=256):
-    dataset = RedditDataset(config, data, categorical_features, string_features, target, weight, sample_voted_users=sample_voted_users, interactive=interactive)
+    dataset = RedditDataset(config, data, categorical_features, string_features, target, weight=weight, sample_voted_users=sample_voted_users, interactive=interactive)
     collate_fn = CollateFN(tokenizer)
     data_loader = DataLoader(dataset=dataset, shuffle=shuffle, batch_size=batch_size, collate_fn=collate_fn)
     return dataset, data_loader

@@ -21,6 +21,7 @@ def get_config(config_path, suffix="_train"):
     default_config_path = 'default_config.yml'
     default_config = yaml.safe_load(open(default_config_path, 'r'))
     custom_config = yaml.safe_load(open(config_path, 'r'))
+    debug(custom_config=custom_config)
     config = merge_dict(default_config, custom_config)
     config["save_model_dir"] = os.path.join("trained_models", os.path.basename(config_path).split(".")[0])
     os.makedirs(config["save_model_dir"], exist_ok=True)

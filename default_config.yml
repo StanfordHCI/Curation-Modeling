@@ -8,6 +8,7 @@ model_type: MLR
 use_language_model_encoder: False
 language_model_encoder_name: roberta-base
 encoder_hidden_dim: 768
+l2_normalization: 0.00001
 # weight
 downvote_weight: 1
 user_normalization: equal # null for no normalization, equal for assigning user weight = 1/votes,

@@ -16,22 +16,23 @@ from deepctr_torch.callbacks import ModelCheckpoint
 from deepctr_torch.layers.utils import slice_arrays
 from deepctr_torch.models.basemodel import BaseModel
 import torch.utils.data as Data
-from tensorflow.python.keras.callbacks import CallbackList
+import torch.nn.functional as F
 from tqdm import tqdm
 import numpy as np
 import random
 from tensorflow.python.keras.preprocessing.sequence import pad_sequences
 
 def get_normalization_weights(data:pd.DataFrame, config):
-    upvote_downvote_weights = np.array(1 * (data["VOTE"] == 1) + config["downvote_weight"] * (data["VOTE"] == 0))
+    upvote_downvote_weights = np.array(1 * (data["VOTE"] == 1) + config["downvote_weight"] * (data["VOTE"] != 1))
     user_votes_counter = Counter(data["USERNAME"])
     if config["user_normalization"] == "equal":
         debug(user_normalization = config["user_normalization"])
         user_weights = np.array([100/user_votes_counter[x] for x in data["USERNAME"]])
     else:
         user_weights = np.ones([len(data)])
-    debug(upvote_downvote_weights * user_weights)
-    return upvote_downvote_weights * user_weights
+    normalization_weights = upvote_downvote_weights * user_weights
+    debug(normalization_weights=normalization_weights)
+    return normalization_weights
 
 def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
     if metric_func != sklearn.metrics.accuracy_score and metric_func != _accuracy_score:
@@ -60,13 +61,12 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
         do_validation = True
         split_at = int(len(data) * (1. - validation_split))
         data, val_data = data.iloc[:split_at], data.iloc[split_at:]
-        weights, val_weights = slice_arrays(weights, 0, split_at), slice_arrays(weights, split_at)
+        weights, val_weights = weights[:split_at], weights[split_at:] # slice_arrays(weights, 0, split_at), slice_arrays(weights, split_at)
     else:
         val_data, val_weights = [], []
-    trainset, train_loader = get_data_loader(config, data, model.tokenizer, categorical_features, string_features, target, weights, shuffle=shuffle, batch_size=batch_size)
+    trainset, train_loader = get_data_loader(config, data, model.tokenizer, categorical_features, string_features, target, weight=weights, shuffle=shuffle, batch_size=batch_size)
 
     model = model.train()
-    loss_func = model.loss_func
     optim = model.optim
     best_eval_acc = 0
     if config["load_pretrained_model"]:
@@ -100,11 +100,9 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
                 y_pred = _model(input_ids, token_type_ids, attention_mask)
 
                 optim.zero_grad()
-                loss = loss_func(y_pred.reshape(label.shape), label, weight = weight.reshape(label.shape), reduction='sum')
-                # reg_loss = model.get_regularization_loss()
-
-                # total_loss = loss + reg_loss + model.aux_loss
-                total_loss = loss
+                loss = F.binary_cross_entropy(y_pred.reshape(label.shape), label, weight = weight.reshape(label.shape), reduction='sum')
+                reg_loss = model.get_regularization_loss()
+                total_loss = loss + reg_loss # + model.aux_loss
 
                 loss_epoch += loss.item()
                 total_loss_epoch += total_loss.item()
@@ -250,7 +248,7 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
 if __name__ == "__main__":
     config_path, config = parse_config()
     target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = get_model_input(config)
-    model = TransformerVoter(config, categorical_features, string_features, original_feature_map, num_all_users=num_all_users)
+    model = TransformerVoter(config, categorical_features, string_features, original_feature_map, num_all_users=num_all_users, simple = (config["model_type"] == "simple"))
     train_weights = get_normalization_weights(train_data, config)
     next(train_model(config, model, train_data, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2))
 
