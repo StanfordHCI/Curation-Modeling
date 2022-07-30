@@ -1,9 +1,9 @@
 import torch
 from transformers import AutoModel, AutoTokenizer
+import deepctr_torch.models
 from utils import load_model
 
 def get_ctr_model(model_type):
-    import deepctr_torch.models
     models = {
         "WDL": deepctr_torch.models.WDL,
         "DeepFM": deepctr_torch.models.DeepFM,
@@ -23,9 +23,13 @@ def get_ctr_model(model_type):
         "DIEN": deepctr_torch.models.DIEN,
         "DIN": deepctr_torch.models.DIN,
         "AFN": deepctr_torch.models.AFN,
-        "Linear": deepctr_torch.models.dcn.LinearModel
+        "Linear": get_linear_model
     }
     return models[model_type]
+
+def get_linear_model(linear_feature_columns, dnn_feature_columns, task, device, gpus):
+    return deepctr_torch.models.DCN(linear_feature_columns, dnn_feature_columns, cross_num=0, task=task, device=device, gpus = gpus)
+    
 
 def get_model(config, all_feature_columns, feature_names):
     CTRModel = get_ctr_model(config["model_type"])

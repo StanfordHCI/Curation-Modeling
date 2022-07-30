@@ -189,7 +189,8 @@ def transform_features(data, sparse_features, varlen_sparse_features, dense_feat
     # dense numerical features -> [0,1]
     mms = MinMaxScaler(feature_range=(0,1))
     dense_features = [feat for feat in dense_features if feat in data]
-    data[dense_features] = mms.fit_transform(data[dense_features])
+    if len(dense_features) > 0:
+        data[dense_features] = mms.fit_transform(data[dense_features])
     debug(data=data)
     return data, original_feature_map
 
