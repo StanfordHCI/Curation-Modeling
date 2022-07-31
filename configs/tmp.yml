@@ -1,21 +1,22 @@
 prepared_data_path: data/reddit/tmp.pt
-sample_method: ['SUBMISSION_ID'] # , "add_weak_downvote"
-categorical_features: ['USERNAME', 'AUTHOR', 'SUBMISSION_ID', 'SUBREDDIT', 'NSFW'] # 'SUBMISSION_ID' #! make sure "USERNAME" is the first one
-string_features: [] # "CREATED_TIME"
-model_type: simple # Transformer
-encoder_hidden_dim: 128
+sample_method: ['SUBMISSION_ID', "equal_up_down_votes"] # , "add_weak_downvote"
+categorical_features: [] # 'SUBMISSION_ID' #! make sure "USERNAME" is the first one
+string_features: ["SUBMISSION_TEXT"] # "CREATED_TIME"
+model_type: Transformer # Transformer
+encoder_hidden_dim: 768
 language_model_encoder_name: bert-base-cased
-sample_ratio: 0.05
-train_at_least_n_votes: 3
+sample_ratio: 0.01
+train_at_least_n_votes: 0
 l2_normalization: 0.01
 
 train_test_different_submissions: False
-learning_rate: 0.0001
+learning_rate: 0.001
 num_epochs: 20
-downvote_weight: 5
-user_normalization: null
+downvote_weight: 6
+user_normalization: equal
 
-batch_size: 128
+batch_size: 26
 sample_part_voted_users: False
 use_voted_users_feature: False
 add_target_user_ratio: 0.3
+device: [0,3]

@@ -7,7 +7,7 @@ import torch.nn as nn
 from sklearn.metrics import *
 from superdebug import debug
 
-"""
+
 class PredictionLayer(nn.Module):
     '''
       Arguments
@@ -32,43 +32,25 @@ class PredictionLayer(nn.Module):
         if self.task == "binary":
             output = torch.sigmoid(output)
         return output
-"""
 
-class TransformerVoter(nn.Module):
-    def __init__(self, config, categorical_features, string_features, original_feature_map, num_all_users = 0, task = "binary", simple = False):
-        super(TransformerVoter, self).__init__()
+class GeneralModel(nn.Module):
+    def __init__(self, config, categorical_features, string_features, original_feature_map, num_all_users = 0, task = "binary"):
+        super(GeneralModel, self).__init__()
         self.device = config["device"]
         self.gpus = config["gpus"]
+        self.config = config
         if self.gpus and str(self.gpus[0]) not in self.device:
             raise ValueError("`gpus[0]` should be the same gpu with `device`")
-        self.simple = simple
-        if simple:
-            assert string_features == []
-            self.fcn = nn.Linear(2*len(categorical_features)*config["encoder_hidden_dim"], config["encoder_hidden_dim"])
-        # self.lm_encoder = AutoModel.from_pretrained(config["language_model_encoder_name"])
-        lm_config = BertConfig(num_attention_heads=1, intermediate_size = config["encoder_hidden_dim"], hidden_size=config["encoder_hidden_dim"], num_hidden_layers=1)
-        self.lm_encoder = BertModel(lm_config)
         self.tokenizer = get_tokenizer(config, categorical_features, string_features, original_feature_map, config["use_voted_users_feature"], num_all_users)
-        self.lm_encoder.resize_token_embeddings(len(self.tokenizer))
-        self.prediction_head = nn.Linear(config["encoder_hidden_dim"], 1)
+        self.out = PredictionLayer(task, )
         self.regularization_weight = []
-        self.add_regularization_weight(self.lm_encoder.parameters(), l2=config["l2_normalization"])
-        self.add_regularization_weight(self.prediction_head.parameters(), l2=config["l2_normalization"])
-        self.to(self.device)
-        self.compile(torch.optim.Adam(self.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
 
-    def forward(self, input_ids, token_type_ids, attention_mask):
-        if not self.simple:
-            encoder_out = self.lm_encoder(input_ids = input_ids, token_type_ids = token_type_ids, attention_mask = attention_mask).last_hidden_state
-            target_hidden = encoder_out[:, 2, :] # [bsz, hidden_size], 2 is for the USER_i
-        else:
-            token_embeddings = self.lm_encoder.embeddings(input_ids = input_ids, token_type_ids = token_type_ids)
-            token_embeddings = token_embeddings[:, 1:-1, :].reshape(token_embeddings.shape[0], -1)
-            target_hidden = self.fcn(token_embeddings)
-            target_hidden = F.gelu(target_hidden)
-        # encoder_out_pooled = (attention_mask[:,:,None] * encoder_out).sum(axis=1) / attention_mask.sum(axis = 1, keepdim = True)
-        logits = self.prediction_head(target_hidden)
-        return torch.sigmoid(logits) # [bsz, 1]
+
+    def post_init(self):
+        self.add_regularization_weight(self.parameters(), l2=self.config["l2_normalization"])
+        self.to(self.device)
+        self.compile(torch.optim.Adam(self.parameters(), lr = self.config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
+
     
     def add_regularization_weight(self, weight_list, l1=0.0, l2=0.0):
         # For a Parameter, put it in a list to keep Compatible with get_regularization_loss()
@@ -161,6 +143,78 @@ class TransformerVoter(nn.Module):
                     metrics_[metric] = _accuracy_score
                 self.metrics_names.append(metric)
         return metrics_
+
+
+class TransformerVoter(GeneralModel):
+    def __init__(self, config, categorical_features, string_features, original_feature_map, num_all_users = 0, task = "binary"):
+        super(TransformerVoter, self).__init__(config, categorical_features, string_features, original_feature_map, num_all_users, task)
+        
+        self.lm_encoder = AutoModel.from_pretrained(config["language_model_encoder_name"])
+        # lm_config = BertConfig(num_attention_heads=1, intermediate_size = config["encoder_hidden_dim"], hidden_size=config["encoder_hidden_dim"], num_hidden_layers=1)
+        # self.lm_encoder = BertModel(lm_config)
+        self.lm_encoder.resize_token_embeddings(len(self.tokenizer))
+        self.prediction_head = nn.Linear(config["encoder_hidden_dim"], 1)
+        self.post_init()
+
+    def forward(self, input_ids, token_type_ids, attention_mask):
+        encoder_out = self.lm_encoder(input_ids = input_ids, token_type_ids = token_type_ids, attention_mask = attention_mask).last_hidden_state
+        target_hidden = encoder_out[:, 2, :] # [bsz, hidden_size], 2 is for the USER_i
+        # encoder_out_pooled = (attention_mask[:,:,None] * encoder_out).sum(axis=1) / attention_mask.sum(axis = 1, keepdim = True)
+        logit = self.prediction_head(target_hidden)
+        return self.out(logit) # [bsz, 1]
+
+class LinearModel(GeneralModel):
+    def __init__(self, config, categorical_features, string_features, original_feature_map, num_all_users = 0, task = "binary"):
+        super(LinearModel, self).__init__(config, categorical_features, string_features, original_feature_map, num_all_users, task)
+        assert string_features == []
+        self.embedding = nn.Embedding(len(self.tokenizer), config["encoder_hidden_dim"])
+        # self.fcn = nn.Linear(len(categorical_features)*config["encoder_hidden_dim"], config["encoder_hidden_dim"])
+        hidden_units = [len(categorical_features)*config["encoder_hidden_dim"], config["encoder_hidden_dim"], config["encoder_hidden_dim"]]
+        self.dropout = nn.Dropout(0)
+        self.linears = nn.ModuleList(
+            [nn.Linear(hidden_units[i], hidden_units[i + 1]) for i in range(len(hidden_units) - 1)])
+        self.activation_layers = nn.ModuleList(
+            [nn.ReLU(inplace=True) for i in range(len(hidden_units) - 1)])
+
+        for name, tensor in self.linears.named_parameters():
+            if 'weight' in name:
+                nn.init.normal_(tensor, mean=0, std=0.0001)
+
+
+
+
+        self.prediction_head = nn.Linear(config["encoder_hidden_dim"], 1)
+        self.post_init()
+    def forward(self, input_ids, token_type_ids, attention_mask):
+        token_embeddings = self.embedding(input_ids[:, 2::2])
+
+
+
+
+        dnn_input = token_embeddings.reshape(token_embeddings.shape[0], -1)
+        logit = torch.zeros([dnn_input.shape[0], 1]).to(self.device)
+        # logit += torch.sum(dnn_input, dim=-1, keepdim = True)
+
+        # target_hidden = self.fcn(dnn_input)
+        # target_hidden = F.gelu(target_hidden)
+        # logit = self.prediction_head(target_hidden)
+
+
+
+        # deep_out = self.dnn(dnn_input)
+        for i in range(len(self.linears)):
+
+            fc = self.linears[i](dnn_input)
+
+            fc = self.activation_layers[i](fc)
+
+            fc = self.dropout(fc)
+            dnn_input = fc
+        logit += self.prediction_head(dnn_input)
+        return self.out(logit) # [bsz, 1]
+
+
+
 def _accuracy_score(y_true, y_pred, sample_weight=None):
     return accuracy_score(y_true, np.where(y_pred > 0.5, 1, 0), sample_weight=sample_weight)
 

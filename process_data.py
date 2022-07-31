@@ -207,6 +207,7 @@ def clean_data(data:pd.DataFrame, categorical_features, string_features):
 
 def transform_features(data, categorical_features, string_features, target):
     original_feature_map = defaultdict(dict)
+    debug(f"Transforming features in {categorical_features}")
     for feature_name in categorical_features:
         if feature_name in data:
             lbe = LabelEncoder()
@@ -280,6 +281,8 @@ def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0, train_t
         train_data = data.iloc[0:10]
     if len(test_data) == 0:
         test_data = data.iloc[-10:]
+    train_data = train_data.sample(frac = 1).reset_index(drop=True)
+    test_data = test_data.sample(frac = 1).reset_index(drop=True)
     debug(train_vote_num = len(train_data), test_vote_num = len(test_data))
     return train_data, test_data
 
@@ -292,8 +295,11 @@ def get_test_data_info(train_data:pd.DataFrame, test_data:pd.DataFrame):
     return test_data_info
 def collect_users_votes_data(train_data:pd.DataFrame, test_data:pd.DataFrame):
     voted_users = defaultdict(set)
-    for row_i, row in tqdm(train_data.iterrows()):
-        voted_users[f'{row["SUBMISSION_ID"]}-{row["VOTE"]}'].add(row["USERNAME"])
+    submission_ids = train_data["SUBMISSION_ID"].to_list()
+    usernames = train_data["USERNAME"].to_list()
+    votes = train_data["VOTE"].to_list()
+    for idx, sub_id in enumerate(tqdm(submission_ids)):
+        voted_users[f'{sub_id}-{votes[idx]}'].add(usernames[idx])
     train_data["UPVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)
     train_data["DOWNVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-0'] - {r["USERNAME"]}), axis=1)
     test_data["UPVOTED_USERS"] = test_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)

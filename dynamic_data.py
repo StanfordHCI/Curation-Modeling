@@ -8,6 +8,7 @@ class RedditDataset(Dataset):
     def __init__(self, config, data:pd.DataFrame, categorical_features, string_features, target, weight = None, sample_voted_users = None, interactive = False):
         super(RedditDataset, self).__init__()
         self.data = data
+        self.df_indices = self.data.index.to_numpy(int)
         self.categorical_features = categorical_features
         self.string_features = string_features
         if sample_voted_users is not None:
@@ -26,8 +27,12 @@ class RedditDataset(Dataset):
         if self.use_voted_users_feature:
             for feat in ["UPVOTED_USERS", "DOWNVOTED_USERS"]:
                 self.featured_data[feat] = data[feat].to_list()
+        for feat in self.featured_data:
+            assert len(self.featured_data[feat]) == len(self.data)
         self.weight = weight
+        assert len(self.weight) == len(self.data)
         self.target_data = data[target[0]].to_numpy()
+        assert len(self.target_data) == len(self.data)
         
     def __len__(self):
         return len(self.data)
@@ -72,7 +77,6 @@ class RedditDataset(Dataset):
         
     def __getitem__(self,idx):
         label = self.target_data[idx]
-        target_user = self.featured_data["USERNAME"][idx]
         strings = []
         for feat in self.categorical_features:
             strings.append(f"[{feat}]")
@@ -81,6 +85,7 @@ class RedditDataset(Dataset):
             strings.append(f"[{feat}]")
             strings.append(str(self.featured_data[feat][idx]))
         if self.use_voted_users_feature:
+            target_user = self.featured_data["USERNAME"][idx]
             for vote in ["upvote", "downvote"]:
                 updown_voted_users = self.featured_data[f"{vote.upper()}D_USERS"][idx]
                 updown_voted_users = self.modify_updown_voted_users(updown_voted_users, target_user, label, vote)
@@ -92,7 +97,8 @@ class RedditDataset(Dataset):
             weight = 1.0
         else:
             weight = self.weight[idx]
-        return input_string, label, weight
+        df_index = self.df_indices[idx]
+        return input_string, label, weight, df_index
 
 
 class CollateFN:
@@ -102,7 +108,7 @@ class CollateFN:
         """
         data: is a list of tuples with (input_string, label, weight)
         """
-        input_strings, labels, weights = zip(*data)
+        input_strings, labels, weights, df_indices = zip(*data)
         tokenized_input_strings = self.tokenizer(list(input_strings), padding=True, truncation=True, max_length=512, return_tensors="pt") # contains: input_ids, token_type_ids, attention_mask
         # raise
         input_ids = tokenized_input_strings["input_ids"]
@@ -110,7 +116,8 @@ class CollateFN:
         attention_mask = tokenized_input_strings["attention_mask"]
         labels = torch.tensor(labels)
         weights = torch.tensor(weights)
-        return input_ids, token_type_ids, attention_mask, labels, weights
+        df_indices = torch.tensor(df_indices)
+        return input_ids, token_type_ids, attention_mask, labels, weights, df_indices
         # features.float(), labels.long(), lengths.long()
 
 def get_data_loader(config, data:pd.DataFrame, tokenizer, categorical_features, string_features, target, weight = None, interactive = False, sample_voted_users = True, shuffle=True, batch_size=256):
