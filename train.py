@@ -64,8 +64,7 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
         weights, val_weights = weights[:split_at], weights[split_at:] # slice_arrays(weights, 0, split_at), slice_arrays(weights, split_at)
     else:
         val_data, val_weights = [], []
-    # trainset, train_loader = get_data_loader(config, data, model.tokenizer, categorical_features, string_features, target, weight=weights, shuffle=shuffle, batch_size=batch_size) # TODO: change back
-    trainset, train_loader = get_data_loader(config, val_data, model.tokenizer, categorical_features, string_features, target, weight=val_weights, shuffle=shuffle, batch_size=batch_size)
+    trainset, train_loader = get_data_loader(config, data, model.tokenizer, categorical_features, string_features, target, weight=weights, shuffle=shuffle, batch_size=batch_size)
 
     model = model.train()
     optim = model.optim
