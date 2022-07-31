@@ -5,6 +5,7 @@ super_debug/
 data/
 output/
 trained_models/
+wandb/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

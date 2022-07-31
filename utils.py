@@ -5,6 +5,7 @@ import shutil
 import yaml
 import torch
 from superdebug import debug
+import wandb as wab
 use_debug = True
 
 def merge_dict(main_dict, new_dict):
@@ -17,20 +18,25 @@ def merge_dict(main_dict, new_dict):
             main_dict[key] = value
     return main_dict
 
-def get_config(config_path, suffix="_train"):
+def get_config(config_path, suffix="_train", wandb:wab = None):
+    # load raw config
     default_config_path = 'default_config.yml'
     default_config = yaml.safe_load(open(default_config_path, 'r'))
     custom_config = yaml.safe_load(open(config_path, 'r'))
     debug(custom_config=custom_config)
-    config = merge_dict(default_config, custom_config)
-    config["save_model_dir"] = os.path.join("trained_models", os.path.basename(config_path).split(".")[0])
+    config:dict = merge_dict(default_config, custom_config)
+
+    experiment_name = os.path.basename(config_path).split(".")[0]
+    now = datetime.datetime.now()
+
+    # add to wandb
+    if wandb is not None:
+        wandb.init(project="curation_modeling", config = config, resume = config["load_pretrained_model"], save_code = True, name = experiment_name + f"{now.year}/{now.month}/{now.day} {now.hour}:{now.minute}")
+
+    # process config
+    config["save_model_dir"] = os.path.join("trained_models", experiment_name)
     os.makedirs(config["save_model_dir"], exist_ok=True)
-    log_path = os.path.join(config["save_model_dir"], os.path.basename(config_path).split(".")[0]+suffix+".log")
-    if os.path.exists(log_path): os.remove(log_path)
-    shutil.copy(config_path, log_path)
-    with open(log_path, 'a') as log:
-        log.write("\n----------------- Below is default config -----------------\n")
-        log.write(open(default_config_path, 'r').read())
+
     if config["device"] != -1 and torch.cuda.is_available():
         print('GPU ready...')
         if config["device"] == -2:
@@ -54,19 +60,27 @@ def get_config(config_path, suffix="_train"):
             print("GPU detected yet using CPU...")
         config["device"] = "cpu"
         config["gpus"] = None
+    
+    # write to log
+    log_path = os.path.join(config["save_model_dir"], experiment_name+suffix+".log")
     config["log_path"] = log_path
-    now = datetime.datetime.now()
+    if os.path.exists(log_path): os.remove(log_path)
+    shutil.copy(config_path, log_path)
+    with open(log_path, 'a') as log:
+        log.write("\n----------------- Below is default config -----------------\n")
+        log.write(open(default_config_path, 'r').read())
     with open(log_path, 'a') as log:
         log.write("\n-----------------" + f"{now.year}/{now.month}/{now.day} {now.hour}:{now.minute}" + "-----------------\n")
     
     return config
     
-def parse_config():
+def parse_config(wandb = None):
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=str, help="Path to custom config file.")
+    parser.add_argument("--test", default=False, action="store_true", help="Whether to only test")
     args = parser.parse_args()
-    config = get_config(args.config)
-    return args.config, config
+    config = get_config(args.config, wandb=wandb)
+    return args, config
 
 def join_sets(sets):
     full_set = set()
@@ -90,6 +104,7 @@ def load_model_dict(save_dir, type = "latest"):
         return None
 
 def load_model(save_dir, model, optim, initial_epoch, best_eval_acc, type = "latest"):
+    debug(f"Loading {type} model...")
     save_dict = load_model_dict(save_dir, type = type)
     if save_dict:
         model.load_state_dict(save_dict['state_dict'])

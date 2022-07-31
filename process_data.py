@@ -353,6 +353,6 @@ def get_model_input(config):
     return target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users
 
 if __name__ == '__main__':
-    config_path, config = parse_config()
+    args, config = parse_config()
     target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = get_model_input(config)
-    debug(config_path=config_path)
+    debug(config_path=args.config)

@@ -49,7 +49,7 @@ class GeneralModel(nn.Module):
     def post_init(self):
         self.add_regularization_weight(self.parameters(), l2=self.config["l2_normalization"])
         self.to(self.device)
-        self.compile(torch.optim.Adam(self.parameters(), lr = self.config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
+        self.compile(torch.optim.Adam(self.parameters(), lr = self.config["learning_rate"]), "binary_crossentropy", metrics=self.config["eval_metrics"])
 
     
     def add_regularization_weight(self, weight_list, l1=0.0, l2=0.0):

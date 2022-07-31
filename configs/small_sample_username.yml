@@ -1,0 +1,20 @@
+sample_method: ['USERNAME'] # , "add_weak_downvote"
+model_type: Transformer
+encoder_hidden_dim: 256
+language_model_encoder_name: prajjwal1/bert-mini
+sample_ratio: 0.005
+train_at_least_n_votes: 0
+l2_normalization: 0.01
+
+train_test_different_submissions: False
+learning_rate: 0.001
+num_epochs: 5
+downvote_weight: 4
+user_normalization: equal
+
+batch_size: 512
+sample_part_voted_users: False
+use_voted_users_feature: True
+add_target_user_ratio: 0.3
+device: [0,1,2,3]
+# eval_all_test_data str len 4914: OrderedDict([('', 0), ('binary_crossentropy', 0.4102218915370277), ('binary_crossentropy_vote_0', 0.4337866105497459), ('binary_crossentropy_vote_1', 0.4030282506721355), ('auc', 0.8896252205135963), ('auc_vote_0', None), ('auc_vote_1', None), ('acc', 0.8161336434042371), ('acc_vote_0', 0.7889983579638752), ('acc_vote_1', 0.8244172770057646), ('_train_user_votes_num>=3', 0), ('binary_crossentropy_train_user_votes_num>=3', 0.4102218915370277), ('binary_crossentropy_vote_0_train_user_votes_num>=3', 0.4337866105497459 ... .8527175078997333)])

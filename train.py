@@ -21,6 +21,8 @@ from tqdm import tqdm
 import numpy as np
 import random
 from tensorflow.python.keras.preprocessing.sequence import pad_sequences
+import wandb
+
 
 def get_normalization_weights(data:pd.DataFrame, config):
     upvote_downvote_weights = np.array(1 * (data["VOTE"] == 1) + config["downvote_weight"] * (data["VOTE"] != 1))
@@ -68,9 +70,9 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
 
     model = model.train()
     optim = model.optim
-    best_eval_acc = 0
+    best_eval_acc, best_eval_acc_weight = 0, 0
     if config["load_pretrained_model"]:
-        model, optim, initial_epoch, best_eval_acc, save_dict = load_model(config["save_model_dir"], model, optim, initial_epoch, best_eval_acc)
+        model, optim, initial_epoch, best_eval_acc_weight, save_dict = load_model(config["save_model_dir"], model, optim, initial_epoch, best_eval_acc_weight)
     if model.gpus:
         if not step_generator:
             print('parallel running on these gpus:', model.gpus)
@@ -139,7 +141,8 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
             
             if do_validation:
                 eval_result = evaluate_model(config, model, val_data, weights = val_weights, batch_size=batch_size)
-                best_eval_acc = max(best_eval_acc, eval_result["acc_with_weight"])
+                best_eval_acc_weight = max(best_eval_acc_weight, eval_result["acc_with_weight"])
+                best_eval_acc = max(best_eval_acc, eval_result["acc"])
             # verbose
             if verbose > 0:
                 epoch_time = int(time.time() - start_time)
@@ -153,10 +156,10 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
                 print(eval_str)
                 with open(config["log_path"], 'a') as log:
                     log.write(eval_str+"\n")
-            save_model(model, epoch, eval_result["acc"], optim, config["save_model_dir"])
-            if best_eval_acc == eval_result["acc_with_weight"]:
+            save_model(model, epoch, eval_result["acc_with_weight"], optim, config["save_model_dir"], "latest")
+            if best_eval_acc_weight == eval_result["acc_with_weight"]:
                 save_model(model, epoch, eval_result["acc_with_weight"], optim, config["save_model_dir"], "best")
-    yield None
+    yield best_eval_acc, best_eval_acc_weight, eval_result["acc"], eval_result["acc_with_weight"], total_loss_epoch / sample_num, np.sum(train_result["acc"]) / len(train_loader)
 
 
 def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=256, shuffle = False, return_prediction = False, sample_voted_users = False, data_info = None, disable_tqdm = False):
@@ -177,26 +180,23 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
             acc = apply_metric(_accuracy_score, label.cpu().numpy(), y_pred.reshape(label.shape))
             accs.append(acc)
     avg_acc = np.sum(accs) / len(test_loader)
-    debug(avg_acc=avg_acc)
 
     pred_ans =  np.concatenate(pred_ans).astype("float64")
     if return_prediction:
         return pred_ans
 
     if data_info is not None:
-        test_filter = {"": (data["VOTE"] >=-1).to_numpy(), "_train_user_votes_num>=3": data_info["train_user_votes_num"] >= 3, "_train_submission_votes_num>=3": data_info["train_submission_votes_num"] >= 3, "_train_user_votes_num<=3": data_info["train_user_votes_num"] <= 3, "_train_submission_votes_num<=3": data_info["train_submission_votes_num"] <= 3} 
+        test_filter = {"": (data["VOTE"] >=-1).to_numpy(), "_train_user_votes_num>=3": (data_info["train_user_votes_num"] >= 3).to_numpy(), "_train_submission_votes_num>=3": (data_info["train_submission_votes_num"] >= 3).to_numpy(), "_train_user_votes_num<=3": (data_info["train_user_votes_num"] <= 3).to_numpy(), "_train_submission_votes_num<=3": (data_info["train_submission_votes_num"] <= 3).to_numpy()} 
     else:
         test_filter = {"": (data["VOTE"] >=-1).to_numpy()}
     ground_truth = data["VOTE"].to_numpy()
     eval_result = OrderedDict()
-    debug(ground_truth=ground_truth, pred_ans=pred_ans)
     for wei in [None, weights]:
         for filter_name in test_filter:
             filter = test_filter[filter_name]
-            eval_result[f"{filter_name}{'_with_weight' if wei is not None else ''}"] = 0
             for name, metric_func in model.metrics.items():
                 if 0 not in ground_truth[filter].shape:
-                    eval_result[f"{name}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, ground_truth[filter], pred_ans[filter], sample_weight=wei[filter] if wei is not None else None) # TODO:
+                    eval_result[f"{name}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, ground_truth[filter], pred_ans[filter], sample_weight=wei[filter] if wei is not None else None)
                 if data is not None:
                     for vote in [0, 1]:
                         if 0 not in ground_truth[(data["VOTE"] == vote).to_numpy() * filter].shape:
@@ -206,15 +206,21 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
 
 
 if __name__ == "__main__":
-    config_path, config = parse_config()
+    args, config = parse_config(wandb)
     target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = get_model_input(config)
-    if config["model_type"] == "Transformer":
-        model = TransformerVoter(config, categorical_features, string_features, original_feature_map, num_all_users=num_all_users)
-    elif config["model_type"] == "linear":
-        model = LinearModel(config, categorical_features, string_features, original_feature_map, num_all_users=num_all_users)
-        
-    train_weights = get_normalization_weights(train_data, config)
-    next(train_model(config, model, train_data, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2))
+
+    if not args.test:
+        if config["model_type"] == "Transformer":
+            model = TransformerVoter(config, categorical_features, string_features, original_feature_map, num_all_users=num_all_users)
+        elif config["model_type"] == "linear":
+            model = LinearModel(config, categorical_features, string_features, original_feature_map, num_all_users=num_all_users)
+            
+        train_weights = get_normalization_weights(train_data, config)
+        best_eval_acc, best_eval_acc_weight, latest_eval_acc, latest_eval_acc_weight, train_loss, train_acc = next(train_model(config, model, train_data, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2))
+        wandb.alert(
+            title="Finished training!", 
+            text=f"best_eval_acc: {best_eval_acc}, best_eval_acc_weight: {best_eval_acc_weight}, latest_eval_acc: {latest_eval_acc}, latest_eval_acc_weight: {latest_eval_acc_weight}, train_loss: {train_loss}, train_acc: {train_acc}"
+        )
 
     model_types = ["latest", "best"]
     for model_type in model_types:
@@ -224,6 +230,9 @@ if __name__ == "__main__":
             debug("Use all voted users as feature")
         eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=False, data_info = test_data_info)
         debug(eval_all_test_data=str(eval_all_test_data))
+        wandb_log = {"train_loss": train_loss, "train_acc": train_acc}
+        wandb_log.update({"test_" + key: value for key, value in eval_all_test_data.items()})
+        wandb.log(wandb_log)
         with open(config["log_path"], 'a') as log:
             log.write(f"Evaluation result of the {model_type} model (use all voted users as feature):" + str(eval_all_test_data)+"\n")
 
@@ -233,4 +242,4 @@ if __name__ == "__main__":
             debug(eval_all_test_data=str(eval_all_test_data))
             with open(config["log_path"], 'a') as log:
                 log.write(f"Evaluation result of the {model_type} model (sample part voted users as feature):" + str(eval_all_test_data)+"\n")
-    debug(config_path = config_path, log_path=config["log_path"])
+    debug(config_path = args.config, log_path=config["log_path"])
