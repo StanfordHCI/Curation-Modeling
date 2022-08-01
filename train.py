@@ -28,12 +28,11 @@ def get_normalization_weights(data:pd.DataFrame, config):
     upvote_downvote_weights = np.array(1 * (data["VOTE"] == 1) + config["downvote_weight"] * (data["VOTE"] != 1))
     user_votes_counter = Counter(data["USERNAME"])
     if config["user_normalization"] == "equal":
-        debug(user_normalization = config["user_normalization"])
         user_weights = np.array([100/user_votes_counter[x] for x in data["USERNAME"]])
     else:
         user_weights = np.ones([len(data)])
     normalization_weights = upvote_downvote_weights * user_weights
-    debug(normalization_weights=normalization_weights)
+    debug(user_normalization = config["user_normalization"], normalization_weights=normalization_weights)
     return normalization_weights
 
 def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
@@ -45,7 +44,8 @@ def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
     else:
         val = metric_func(y_true, y_pred, sample_weight=sample_weight)
     return val
-def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, step_generator = False, n_step_per_sample = 1):
+categorical_features, string_features, target = None, None, None
+def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, step_generator = False, n_step_per_sample = 1, extra_input = None):
     """
     :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a dictionary mapping input names to Numpy arrays.
     :param y: Numpy array of target (label) data (if the model has a single output), or list of Numpy arrays (if the model has multiple outputs).
@@ -66,7 +66,7 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
         weights, val_weights = weights[:split_at], weights[split_at:] # slice_arrays(weights, 0, split_at), slice_arrays(weights, split_at)
     else:
         val_data, val_weights = [], []
-    trainset, train_loader = get_data_loader(config, data, model.tokenizer, categorical_features, string_features, target, weight=weights, shuffle=shuffle, batch_size=batch_size)
+    trainset, train_loader = get_data_loader(config, data, model.tokenizer, (categorical_features if extra_input is None else extra_input[0]), (string_features if extra_input is None else extra_input[1]), (target if extra_input is None else extra_input[2]), weight=weights, shuffle=shuffle, batch_size=batch_size)
 
     model = model.train()
     optim = model.optim
@@ -92,6 +92,8 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
         train_result = {}
         if not step_generator:
             train_loader_tqdm = tqdm(train_loader, desc = "Training")
+        else:
+            train_loader_tqdm = train_loader
         for _, train_input in enumerate(train_loader_tqdm):
             # x, y, weight = convert_CTR_model_input(model, train_input, sample_voted_users=config["sample_part_voted_users"], add_target_user_ratio = config["add_target_user_ratio"])
             input_ids, token_type_ids, attention_mask, label, weight, df_index = train_input
@@ -120,25 +122,6 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
                 yield model
 
         if not step_generator:
-
-
-
-        #     valset, val_loader = get_data_loader(config, val_data, model.tokenizer, categorical_features, string_features, target, weight=val_weights, shuffle=shuffle, batch_size=batch_size)
-        #     accs = []
-        #     with torch.no_grad():
-        #         model.eval()
-        #         for _, val_input in enumerate(tqdm(val_loader, desc = "Validating")):
-        #             input_ids, token_type_ids, attention_mask, label, weight, df_index = val_input
-        #             input_ids, token_type_ids, attention_mask, label, weight = to_device(model.device, False, input_ids, token_type_ids, attention_mask, label.float(), weight)
-        #             y_pred = _model(input_ids, token_type_ids, attention_mask)
-        #             acc = apply_metric(_accuracy_score, label.cpu().numpy(), y_pred.reshape(label.shape).cpu().data.numpy())
-        #             accs.append(acc)
-        #     avg_acc = np.sum(accs) / len(val_loader)
-        #     debug(avg_acc=avg_acc)
-
-
-
-            
             if do_validation:
                 eval_result = evaluate_model(config, model, val_data, weights = val_weights, batch_size=batch_size)
                 best_eval_acc_weight = max(best_eval_acc_weight, eval_result["acc_with_weight"])
@@ -147,7 +130,10 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
             if verbose > 0:
                 epoch_time = int(time.time() - start_time)
                 print('Epoch {0}/{1}'.format(epoch + 1, epochs))
-                eval_str = "{0}s - loss: {1: .4f}".format(epoch_time, total_loss_epoch / sample_num)
+                train_loss = total_loss_epoch / sample_num
+                train_acc = np.sum(train_result["acc"]) / len(train_loader)
+                wandb.log({"train_loss": train_loss, "train_acc": train_acc, "val_acc": eval_result["acc"], "val_acc_vote_0": eval_result["acc_vote_0"], "val_acc_vote_1": eval_result["acc_vote_1"], "val_acc_with_weight": eval_result["acc_with_weight"], "epoch": epoch + 1})
+                eval_str = "{0}s - loss: {1: .4f}".format(epoch_time, train_loss)
                 for name, result in train_result.items():
                     eval_str += " - " + name + ": {0: .4f}".format(np.sum(result) / len(train_loader))
                 if do_validation:
@@ -159,14 +145,16 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
             save_model(model, epoch, eval_result["acc_with_weight"], optim, config["save_model_dir"], "latest")
             if best_eval_acc_weight == eval_result["acc_with_weight"]:
                 save_model(model, epoch, eval_result["acc_with_weight"], optim, config["save_model_dir"], "best")
-    yield best_eval_acc, best_eval_acc_weight, eval_result["acc"], eval_result["acc_with_weight"], total_loss_epoch / sample_num, np.sum(train_result["acc"]) / len(train_loader)
+    if step_generator:
+        yield None
+    else:
+        yield best_eval_acc, best_eval_acc_weight, eval_result["acc"], eval_result["acc_with_weight"], train_loss, train_acc
 
 
-def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=256, shuffle = False, return_prediction = False, sample_voted_users = False, data_info = None, disable_tqdm = False):
+def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=256, return_prediction = False, sample_voted_users = False, data_info = None, disable_tqdm = False, extra_input = None):
     model = model.eval()
-    testset, test_loader = get_data_loader(config, data, model.tokenizer, categorical_features, string_features, target, weights, sample_voted_users=sample_voted_users, shuffle=False, batch_size=batch_size)
+    testset, test_loader = get_data_loader(config, data, model.tokenizer, (categorical_features if extra_input is None else extra_input[0]), (string_features if extra_input is None else extra_input[1]), (target if extra_input is None else extra_input[2]), weights, sample_voted_users=sample_voted_users, shuffle=False, batch_size=batch_size)
     pred_ans = []
-    accs = []
 
     if not disable_tqdm:
         test_loader = tqdm(test_loader)
@@ -177,9 +165,6 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
             input_ids, token_type_ids, attention_mask, label, weight = to_device(model.device, False, input_ids, token_type_ids, attention_mask, label.float(), weight)
             y_pred = model(input_ids, token_type_ids, attention_mask).cpu().data.numpy()  # .squeeze()
             pred_ans.append(y_pred)
-            acc = apply_metric(_accuracy_score, label.cpu().numpy(), y_pred.reshape(label.shape))
-            accs.append(acc)
-    avg_acc = np.sum(accs) / len(test_loader)
 
     pred_ans =  np.concatenate(pred_ans).astype("float64")
     if return_prediction:
@@ -189,7 +174,7 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
         test_filter = {"": (data["VOTE"] >=-1).to_numpy(), "_train_user_votes_num>=3": (data_info["train_user_votes_num"] >= 3).to_numpy(), "_train_submission_votes_num>=3": (data_info["train_submission_votes_num"] >= 3).to_numpy(), "_train_user_votes_num<=3": (data_info["train_user_votes_num"] <= 3).to_numpy(), "_train_submission_votes_num<=3": (data_info["train_submission_votes_num"] <= 3).to_numpy()} 
     else:
         test_filter = {"": (data["VOTE"] >=-1).to_numpy()}
-    ground_truth = data["VOTE"].to_numpy()
+    ground_truth = (data["VOTE"].to_numpy() > 0.5).astype(float)
     eval_result = OrderedDict()
     for wei in [None, weights]:
         for filter_name in test_filter:

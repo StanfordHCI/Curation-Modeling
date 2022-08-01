@@ -218,21 +218,14 @@ class LinearModel(GeneralModel):
 def _accuracy_score(y_true, y_pred, sample_weight=None):
     return accuracy_score(y_true, np.where(y_pred > 0.5, 1, 0), sample_weight=sample_weight)
 
-def get_best_model(config, all_feature_columns, feature_names):
-    """
-    CTRModel = get_ctr_model(config["model_type"])
-    model = CTRModel(all_feature_columns, all_feature_columns, task='binary', device=config["device"], gpus = config["gpus"])
-    model.compile(torch.optim.Adam(model.parameters(), lr = config["learning_rate"]), "binary_crossentropy", metrics=['binary_crossentropy', "auc", "acc"])
-    """
-    model = TransformerVoter(config, all_feature_columns, feature_names)
+def get_best_model(config, categorical_features, string_features, original_feature_map):
+    model = TransformerVoter(config, categorical_features, string_features, original_feature_map)
     model, _, _, _, model_dict = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
     assert model_dict is not None, "No trained model"
     state_dict = model_dict["state_dict"]
-    if config["model_type"] == "MLR":
-        user_embedding = torch.cat([state_dict[f"region_linear_model.{i}.embedding_dict.USERNAME.weight"] for i in range(20) if f"region_linear_model.{i}.embedding_dict.USERNAME.weight" in state_dict], dim = -1)
-    else:
-        user_embedding = state_dict[f"embedding_dict.USERNAME.weight"] #[num_users, user_embed_dim]
-    return model, user_embedding.cpu()
+    if config["model_type"] == "Transformer":
+        token_embedding = model.lm_encoder.embeddings.word_embeddings # TODO:
+    return model, token_embedding.cpu()
 
 def get_tokenizer(config, categorical_features, string_features, original_feature_map, use_voted_users_feature = False, num_all_users = 0):
     tokenizer = AutoTokenizer.from_pretrained(config["language_model_encoder_name"], use_fast=True)

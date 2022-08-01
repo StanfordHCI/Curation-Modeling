@@ -18,12 +18,13 @@ def merge_dict(main_dict, new_dict):
             main_dict[key] = value
     return main_dict
 
-def get_config(config_path, suffix="_train", wandb:wab = None):
+def get_config(config_path, suffix="_train", wandb:wab = None, print_config = True):
     # load raw config
     default_config_path = 'default_config.yml'
     default_config = yaml.safe_load(open(default_config_path, 'r'))
     custom_config = yaml.safe_load(open(config_path, 'r'))
-    debug(custom_config=custom_config)
+    if print_config:
+        debug(custom_config=custom_config)
     config:dict = merge_dict(default_config, custom_config)
 
     experiment_name = os.path.basename(config_path).split(".")[0]
@@ -31,7 +32,7 @@ def get_config(config_path, suffix="_train", wandb:wab = None):
 
     # add to wandb
     if wandb is not None:
-        wandb.init(project="curation_modeling", config = config, resume = config["load_pretrained_model"], save_code = True, name = experiment_name + f"{now.year}/{now.month}/{now.day} {now.hour}:{now.minute}")
+        wandb.init(project="curation_modeling", config = config, resume = config["load_pretrained_model"], save_code = True, name = experiment_name + f"-{now.year}/{now.month}/{now.day}_{now.hour}:{now.minute}")
 
     # process config
     config["save_model_dir"] = os.path.join("trained_models", experiment_name)

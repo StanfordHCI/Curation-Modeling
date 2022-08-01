@@ -30,7 +30,7 @@ class RedditDataset(Dataset):
         for feat in self.featured_data:
             assert len(self.featured_data[feat]) == len(self.data)
         self.weight = weight
-        assert len(self.weight) == len(self.data)
+        assert self.weight is None or len(self.weight) == len(self.data)
         self.target_data = data[target[0]].to_numpy()
         assert len(self.target_data) == len(self.data)
         
