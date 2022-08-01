@@ -23,7 +23,7 @@ use_voted_users_feature: True # will add "UPVOTED_USERS" and "DOWNVOTED_USERS"
 sample_part_voted_users: True
 add_target_user_ratio: 0.35
 prepared_data_path: data/reddit/prepared_data.pt
-train_at_least_n_votes: 0
+train_at_least_n_votes: 0 # for each posts, train with "train_at_least_n_votes" votes, and test on other votes
 train_test_different_submissions: False
 submission_text_dict_path: data/reddit/submission_text_dict.pt
 

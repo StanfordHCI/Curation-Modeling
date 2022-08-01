@@ -24,7 +24,7 @@ def get_config(config_path, suffix="_train", wandb:wab = None, print_config = Tr
     default_config = yaml.safe_load(open(default_config_path, 'r'))
     custom_config = yaml.safe_load(open(config_path, 'r'))
     if print_config:
-        debug(custom_config=custom_config)
+        debug(custom_config=custom_config, config_path=config_path)
     config:dict = merge_dict(default_config, custom_config)
 
     experiment_name = os.path.basename(config_path).split(".")[0]
@@ -38,6 +38,8 @@ def get_config(config_path, suffix="_train", wandb:wab = None, print_config = Tr
     config["save_model_dir"] = os.path.join("trained_models", experiment_name)
     os.makedirs(config["save_model_dir"], exist_ok=True)
 
+    if suffix != "_train" and type(config["device"]) == list:
+        config["device"] = -2
     if config["device"] != -1 and torch.cuda.is_available():
         print('GPU ready...')
         if config["device"] == -2:
@@ -97,16 +99,16 @@ def save_model(model, epoch, eval_acc, optim, save_dir, type = "latest"):
 		'optimizer': optim.state_dict()}
     torch.save(save_dict, save_path)
 
-def load_model_dict(save_dir, type = "latest"):
+def load_model_dict(save_dir, type = "latest", device = "cpu"):
     save_path = os.path.join(save_dir, f"{type}.pt")
     if os.path.exists(save_path):
-        return torch.load(save_path)
+        return torch.load(save_path, map_location = device)
     else:
         return None
 
 def load_model(save_dir, model, optim, initial_epoch, best_eval_acc, type = "latest"):
     debug(f"Loading {type} model...")
-    save_dict = load_model_dict(save_dir, type = type)
+    save_dict = load_model_dict(save_dir, type = type, device = model.device)
     if save_dict:
         model.load_state_dict(save_dict['state_dict'])
         # if lm_encoder is not None and 'lm_encoder' in save_dict:

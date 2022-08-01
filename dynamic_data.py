@@ -56,7 +56,7 @@ class RedditDataset(Dataset):
                 modified_updown_voted_users = random.sample(list(updown_voted_users), sample_num)
             else:
                 print(f"Original {vote}d users:", list(updown_voted_users))
-                selected_users = input(f"Please select {vote}d users (input '.' to stop): ")
+                selected_users = input(f"Please select {vote}d users (they will later further converted to USERNAME_i, input '.' to stop): ")
                 if selected_users == ".":
                     return None
                 modified_updown_voted_users = [int(user) for user in selected_users.split() if int(user) != 0]
@@ -89,6 +89,8 @@ class RedditDataset(Dataset):
             for vote in ["upvote", "downvote"]:
                 updown_voted_users = self.featured_data[f"{vote.upper()}D_USERS"][idx]
                 updown_voted_users = self.modify_updown_voted_users(updown_voted_users, target_user, label, vote)
+                if updown_voted_users is None:
+                    return None
                 strings.append(f"[{vote.upper()}D_USERS]")
                 for user in updown_voted_users:
                     strings.append(f"USERNAME_{user}")

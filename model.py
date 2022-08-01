@@ -148,10 +148,11 @@ class GeneralModel(nn.Module):
 class TransformerVoter(GeneralModel):
     def __init__(self, config, categorical_features, string_features, original_feature_map, num_all_users = 0, task = "binary"):
         super(TransformerVoter, self).__init__(config, categorical_features, string_features, original_feature_map, num_all_users, task)
-        
-        self.lm_encoder = AutoModel.from_pretrained(config["language_model_encoder_name"])
-        # lm_config = BertConfig(num_attention_heads=1, intermediate_size = config["encoder_hidden_dim"], hidden_size=config["encoder_hidden_dim"], num_hidden_layers=1)
-        # self.lm_encoder = BertModel(lm_config)
+        if "custom" not in config["language_model_encoder_name"]:
+            self.lm_encoder = AutoModel.from_pretrained(config["language_model_encoder_name"])
+        else:
+            lm_config = BertConfig(num_attention_heads=2, intermediate_size = config["encoder_hidden_dim"], hidden_size=config["encoder_hidden_dim"], num_hidden_layers=2)
+            self.lm_encoder = BertModel(lm_config)
         self.lm_encoder.resize_token_embeddings(len(self.tokenizer))
         self.prediction_head = nn.Linear(config["encoder_hidden_dim"], 1)
         self.post_init()
@@ -219,16 +220,24 @@ def _accuracy_score(y_true, y_pred, sample_weight=None):
     return accuracy_score(y_true, np.where(y_pred > 0.5, 1, 0), sample_weight=sample_weight)
 
 def get_best_model(config, categorical_features, string_features, original_feature_map):
+    model_device, model_gpus = config["device"], config["gpus"]
+    config["device"], config["gpus"] = "cpu", None
     model = TransformerVoter(config, categorical_features, string_features, original_feature_map)
     model, _, _, _, model_dict = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
+    model.device, config["device"], model.gpus, config["gpus"] = model_device, model_device, model_gpus, model_gpus
+    model.to(model_device)
     assert model_dict is not None, "No trained model"
-    state_dict = model_dict["state_dict"]
+    # state_dict = model_dict["state_dict"]
     if config["model_type"] == "Transformer":
         token_embedding = model.lm_encoder.embeddings.word_embeddings # TODO:
     return model, token_embedding.cpu()
 
 def get_tokenizer(config, categorical_features, string_features, original_feature_map, use_voted_users_feature = False, num_all_users = 0):
-    tokenizer = AutoTokenizer.from_pretrained(config["language_model_encoder_name"], use_fast=True)
+    if "custom" not in config["language_model_encoder_name"]:
+        tokenizer = AutoTokenizer.from_pretrained(config["language_model_encoder_name"], use_fast=True)
+    else:
+        debug("Initializing the tokenizer from sbert-base-uncased")
+        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased", use_fast=True)
     
     debug(original_token_num = len(tokenizer))
     new_tokens = ["[SEP]"]
