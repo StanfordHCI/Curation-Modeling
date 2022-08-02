@@ -9,6 +9,7 @@ use_language_model_encoder: False
 language_model_encoder_name: roberta-base
 encoder_hidden_dim: 768
 l2_normalization: 0.00001
+loss_function: binary_crossentropy
 eval_metrics: ["acc"] # ['binary_crossentropy', "auc", "acc"]
 # weight
 downvote_weight: 1

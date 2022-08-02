@@ -164,10 +164,10 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
                     nearby_time_indices.update(set(upvote_data["NEARBY_TIME_BEFORE_INDICES"]))
                     nearby_time_indices.update(set(upvote_data["NEARBY_TIME_AFTER_INDICES"]))
                     nearby_time_indices = list(nearby_time_indices - {-1})
-                    # nearby_time_indices = random.sample(nearby_time_indices, min(len(nearby_time_indices), upvote_num - downvote_num))  # TODO: do sample
+                    nearby_time_indices = random.sample(nearby_time_indices, min(len(nearby_time_indices), upvote_num - downvote_num))
                     weak_downvote_data = vote_data[vote_data.index.isin(nearby_time_indices)]
                     weak_downvote_data.loc[:, "USERNAME"] = username
-                    weak_downvote_data.loc[:, "VOTE"] = "downvote" # TODO: weak_downvote
+                    weak_downvote_data.loc[:, "VOTE"] = "weak_downvote"
                     vote_data_list.append(weak_downvote_data)
             debug(original_vote_data_len = len(vote_data), original_upvote_data_len = sum([len(user_votes_indices[key]) if key.endswith("upvote") else 0 for key in user_votes_indices]), original_downvote_data_len = sum([len(user_votes_indices[key]) if key.endswith("downvote") else 0 for key in user_votes_indices]))
             vote_data = pd.concat(vote_data_list, axis = 0)
@@ -212,16 +212,13 @@ def transform_features(data, categorical_features, string_features, target):
         if feature_name in data:
             lbe = LabelEncoder()
             original_features = data[feature_name]
-            if feature_name != "VOTE":
-                data[feature_name] = lbe.fit_transform(original_features)
-            else:
-                data["VOTE"] = data["VOTE"].map({"upvote":1.0, "downvote": 0.0, "weak_downvote": 0.3})
+            data[feature_name] = lbe.fit_transform(original_features)
             for i, transformed_feature in enumerate(data[feature_name]):
                 if transformed_feature not in original_feature_map[feature_name]:
                     original_feature_map[feature_name][transformed_feature] = original_features[i]
 
     lbe = LabelEncoder()
-    data[target[0]] = lbe.fit_transform(data[target[0]])
+    data["VOTE"] = data["VOTE"].map({"upvote":1.0, "downvote": 0.0, "weak_downvote": 0.3})
     # # dense numerical features -> [0,1]
     # mms = MinMaxScaler(feature_range=(0,1))
     # dense_features = [feat for feat in dense_features if feat in data]

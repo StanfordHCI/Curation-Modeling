@@ -49,7 +49,7 @@ class GeneralModel(nn.Module):
     def post_init(self):
         self.add_regularization_weight(self.parameters(), l2=self.config["l2_normalization"])
         self.to(self.device)
-        self.compile(torch.optim.Adam(self.parameters(), lr = self.config["learning_rate"]), "binary_crossentropy", metrics=self.config["eval_metrics"])
+        self.compile(torch.optim.Adam(self.parameters(), lr = self.config["learning_rate"]), self.config["loss_function"], metrics=self.config["eval_metrics"])
 
     
     def add_regularization_weight(self, weight_list, l1=0.0, l2=0.0):
@@ -113,6 +113,12 @@ class GeneralModel(nn.Module):
                 loss_func = F.binary_cross_entropy
             elif loss == "mse":
                 loss_func = F.mse_loss
+                def weighted_mse_loss(input, target, weight, reduction = "mean"):
+                    if reduction == "mean":
+                        return torch.mean((weight * (input - target) ** 2))
+                    elif reduction == "sum":
+                        return torch.sum((weight * (input - target) ** 2))
+                loss_func = weighted_mse_loss
             elif loss == "mae":
                 loss_func = F.l1_loss
             else:

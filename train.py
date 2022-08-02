@@ -104,7 +104,7 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
                 y_pred = _model(input_ids, token_type_ids, attention_mask)
 
                 optim.zero_grad()
-                loss = F.binary_cross_entropy(y_pred.reshape(label.shape), label, weight = weight.reshape(label.shape), reduction='sum')
+                loss = model.loss_func(y_pred.reshape(label.shape), label, weight = weight.reshape(label.shape), reduction='sum')
                 reg_loss = model.get_regularization_loss()
                 total_loss = loss + reg_loss # + model.aux_loss
 
@@ -117,7 +117,7 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
                 for name, metric_func in model.metrics.items():
                     if name not in train_result:
                         train_result[name] = []
-                    metric_result = apply_metric(metric_func, label.cpu().numpy(), y_pred.reshape(label.shape).cpu().data.numpy())
+                    metric_result = apply_metric(metric_func, (label.cpu().numpy() > 0.5).astype(int), y_pred.reshape(label.shape).cpu().data.numpy())
                     if metric_result is not None: train_result[name].append(metric_result)
             if step_generator:
                 yield model
@@ -253,20 +253,12 @@ if __name__ == "__main__":
     model_type = "best"
     model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, model_type)
     test_weights = get_normalization_weights(test_data, config)
-    if config["use_voted_users_feature"]:
-        debug("Use all voted users as feature")
+    if config["use_voted_users_feature"]: debug("Use all voted users as feature")
     eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=False, data_info = test_data_info)
-    debug(eval_all_test_data=str(eval_all_test_data))
+    eval_result_str = "".join([f"- {key}: {value:.4f} " for key, value in eval_all_test_data.items()])
+    debug(eval_all_test_data=str(eval_result_str))
     wandb_log = {"train_loss": train_loss, "train_acc": train_acc}
     wandb_log.update({"test_" + key: value for key, value in eval_all_test_data.items()})
     wandb.log(wandb_log)
     with open(config["log_path"], 'a') as log:
-        log.write(f"Evaluation result of the {model_type} model (use all voted users as feature):" + str(eval_all_test_data)+"\n")
-
-    if config["use_voted_users_feature"] and config["sample_part_voted_users"]:
-        debug("Sample part voted users as feature")
-        eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=True, data_info = test_data_info)
-        debug(eval_all_test_data=str(eval_all_test_data))
-        with open(config["log_path"], 'a') as log:
-            log.write(f"Evaluation result of the {model_type} model (sample part voted users as feature):" + str(eval_all_test_data)+"\n")
-    debug(config_path = args.config, log_path=config["log_path"])
+        log.write(f"Evaluation result of the {model_type} model (use all voted users as feature):" + eval_result_str +"\n")

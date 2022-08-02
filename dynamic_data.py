@@ -32,6 +32,7 @@ class RedditDataset(Dataset):
         self.weight = weight
         assert self.weight is None or len(self.weight) == len(self.data)
         self.target_data = data[target[0]].to_numpy()
+        assert all(self.target_data <= 1)
         assert len(self.target_data) == len(self.data)
         
     def __len__(self):
