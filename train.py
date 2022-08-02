@@ -3,6 +3,7 @@ from collections import Counter, OrderedDict
 import datetime
 import os
 import time
+from matplotlib import pyplot as plt
 import pandas as pd
 import sklearn
 import torch
@@ -22,6 +23,7 @@ import numpy as np
 import random
 from tensorflow.python.keras.preprocessing.sequence import pad_sequences
 import wandb
+import seaborn as sns
 
 
 def get_normalization_weights(data:pd.DataFrame, config):
@@ -32,7 +34,6 @@ def get_normalization_weights(data:pd.DataFrame, config):
     else:
         user_weights = np.ones([len(data)])
     normalization_weights = upvote_downvote_weights * user_weights
-    debug(user_normalization = config["user_normalization"], normalization_weights=normalization_weights)
     return normalization_weights
 
 def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
@@ -151,7 +152,7 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
         yield best_eval_acc, best_eval_acc_weight, eval_result["acc"], eval_result["acc_with_weight"], train_loss, train_acc
 
 
-def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=256, return_prediction = False, sample_voted_users = False, data_info = None, disable_tqdm = False, extra_input = None):
+def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=256, ret = "eval_result", sample_voted_users = False, data_info:pd.DataFrame = None, disable_tqdm = False, extra_input = None, simple = True):
     model = model.eval()
     testset, test_loader = get_data_loader(config, data, model.tokenizer, (categorical_features if extra_input is None else extra_input[0]), (string_features if extra_input is None else extra_input[1]), (target if extra_input is None else extra_input[2]), weights, sample_voted_users=sample_voted_users, shuffle=False, batch_size=batch_size)
     pred_ans = []
@@ -161,19 +162,20 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
     with torch.no_grad():
         for _, test_input in enumerate(test_loader):
             input_ids, token_type_ids, attention_mask, label, weight, df_index = test_input
-            # x, _y, weight = convert_CTR_model_input(model, test_input, sample_voted_users=sample_voted_users)
             input_ids, token_type_ids, attention_mask, label, weight = to_device(model.device, False, input_ids, token_type_ids, attention_mask, label.float(), weight)
             y_pred = model(input_ids, token_type_ids, attention_mask).cpu().data.numpy()  # .squeeze()
             pred_ans.append(y_pred)
 
     pred_ans =  np.concatenate(pred_ans).astype("float64")
-    if return_prediction:
+    if ret == "prediction":
         return pred_ans
 
-    if data_info is not None:
-        test_filter = {"": (data["VOTE"] >=-1).to_numpy(), "_train_user_votes_num>=3": (data_info["train_user_votes_num"] >= 3).to_numpy(), "_train_submission_votes_num>=3": (data_info["train_submission_votes_num"] >= 3).to_numpy(), "_train_user_votes_num<=3": (data_info["train_user_votes_num"] <= 3).to_numpy(), "_train_submission_votes_num<=3": (data_info["train_submission_votes_num"] <= 3).to_numpy()} 
-    else:
+    if simple or data_info is None:
         test_filter = {"": (data["VOTE"] >=-1).to_numpy()}
+    else:
+        test_filter = {"": (data["VOTE"] >=-1).to_numpy(), "_train_user_votes_num>=3": (data_info["train_user_votes_num"] >= 3).to_numpy(), "_train_submission_votes_num>=3": (data_info["train_submission_votes_num"] >= 3).to_numpy(), "_train_user_votes_num<=3": (data_info["train_user_votes_num"] <= 3).to_numpy(), "_train_submission_votes_num<=3": (data_info["train_submission_votes_num"] <= 3).to_numpy()} 
+
+    # calculate all evaluation results
     ground_truth = (data["VOTE"].to_numpy() > 0.5).astype(float)
     eval_result = OrderedDict()
     for wei in [None, weights]:
@@ -186,8 +188,49 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
                     for vote in [0, 1]:
                         if 0 not in ground_truth[(data["VOTE"] == vote).to_numpy() * filter].shape:
                             eval_result[f"{name}_vote_{vote}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, ground_truth[(data["VOTE"] == vote).to_numpy() * filter], pred_ans[(data["VOTE"] == vote).to_numpy() * filter], sample_weight=wei[(data["VOTE"] == vote).to_numpy() * filter] if wei is not None else None)
+
+    # draw #votes for a user, #votes for a submission <-> acc, confidence curve
+    if (not simple) and (data_info is not None):
+        train_user_votes_nums = data_info["train_user_votes_num"].to_numpy()
+        train_submission_votes_nums = data_info["train_submission_votes_num"].to_numpy()
+        train_user_votes_num_acc_df = pd.DataFrame(np.zeros((max(train_user_votes_nums) + 1,3)), columns=['Acc', 'Confidence', 'Total'])
+        train_submission_votes_num_acc_df = pd.DataFrame(np.zeros((max(train_submission_votes_nums) + 1,3)), columns=['Acc', 'Confidence', 'Total'])
+        for vote_i, pred_score in enumerate(pred_ans):
+            pred_vote = float(pred_score > 0.5)
+            gt_vote = ground_truth[vote_i]
+            train_user_votes_num = train_user_votes_nums[vote_i]
+            train_submission_votes_num = train_submission_votes_nums[vote_i] 
+
+            train_submission_votes_num_acc_df.at[train_submission_votes_num, "Acc"] += int(pred_vote == gt_vote)
+            train_submission_votes_num_acc_df.at[train_submission_votes_num, "Confidence"] += abs(pred_score - 0.5)
+            train_submission_votes_num_acc_df.at[train_submission_votes_num, "Total"] += 1
+
+            train_user_votes_num_acc_df.at[train_user_votes_num, "Acc"] += int(pred_vote == gt_vote)
+            train_user_votes_num_acc_df.at[train_user_votes_num, "Confidence"] += abs(pred_score - 0.5)
+            train_user_votes_num_acc_df.at[train_user_votes_num, "Total"] += 1
+        
+        train_submission_votes_num_acc_df = train_submission_votes_num_acc_df[train_submission_votes_num_acc_df["Total"] > 0]
+        train_submission_votes_num_acc_df["Acc rate"] = train_submission_votes_num_acc_df["Acc"]/train_submission_votes_num_acc_df["Total"]
+        train_submission_votes_num_acc_df["Avg confidence"] = train_submission_votes_num_acc_df["Confidence"]/train_submission_votes_num_acc_df["Total"]
+        train_submission_votes_num_acc_df["Total scaled"] = train_submission_votes_num_acc_df["Total"]/max(train_submission_votes_num_acc_df["Total"])
+        print(train_submission_votes_num_acc_df)
+        sns.set_theme()
+        sns.lineplot(data=train_submission_votes_num_acc_df[["Acc rate", "Avg confidence", "Total scaled"]], legend = "auto").set(title='Accuracy & confidence given different #votes on this post')
+        plt.show()
+
+        train_user_votes_num_acc_df = train_user_votes_num_acc_df[train_user_votes_num_acc_df["Total"] > 0]
+        train_user_votes_num_acc_df["Acc rate"] = train_user_votes_num_acc_df["Acc"]/train_user_votes_num_acc_df["Total"]
+        train_user_votes_num_acc_df["Avg confidence"] = train_user_votes_num_acc_df["Confidence"]/train_user_votes_num_acc_df["Total"]
+        train_user_votes_num_acc_df["Total scaled"] = train_user_votes_num_acc_df["Total"]/max(train_user_votes_num_acc_df["Total"])
+        sns.set_theme()
+        sns.lineplot(data=train_user_votes_num_acc_df[["Acc rate", "Avg confidence", "Total scaled"]], legend = "auto").set(title='Accuracy & confidence given different #votes from this user')
+        plt.show()
+
     model = model.train()
-    return eval_result
+    if ret == "eval_result":
+        return eval_result
+    elif ret == "eval_result_prediction":
+        return eval_result, pred_ans
 
 
 if __name__ == "__main__":
@@ -207,24 +250,23 @@ if __name__ == "__main__":
             text=f"best_eval_acc: {best_eval_acc}, best_eval_acc_weight: {best_eval_acc_weight}, latest_eval_acc: {latest_eval_acc}, latest_eval_acc_weight: {latest_eval_acc_weight}, train_loss: {train_loss}, train_acc: {train_acc}"
         )
 
-    model_types = ["latest", "best"]
-    for model_type in model_types:
-        model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, "best")
-        test_weights = get_normalization_weights(test_data, config)
-        if config["use_voted_users_feature"]:
-            debug("Use all voted users as feature")
-        eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=False, data_info = test_data_info)
-        debug(eval_all_test_data=str(eval_all_test_data))
-        wandb_log = {"train_loss": train_loss, "train_acc": train_acc}
-        wandb_log.update({"test_" + key: value for key, value in eval_all_test_data.items()})
-        wandb.log(wandb_log)
-        with open(config["log_path"], 'a') as log:
-            log.write(f"Evaluation result of the {model_type} model (use all voted users as feature):" + str(eval_all_test_data)+"\n")
+    model_type = "best"
+    model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, model_type)
+    test_weights = get_normalization_weights(test_data, config)
+    if config["use_voted_users_feature"]:
+        debug("Use all voted users as feature")
+    eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=False, data_info = test_data_info)
+    debug(eval_all_test_data=str(eval_all_test_data))
+    wandb_log = {"train_loss": train_loss, "train_acc": train_acc}
+    wandb_log.update({"test_" + key: value for key, value in eval_all_test_data.items()})
+    wandb.log(wandb_log)
+    with open(config["log_path"], 'a') as log:
+        log.write(f"Evaluation result of the {model_type} model (use all voted users as feature):" + str(eval_all_test_data)+"\n")
 
-        if config["use_voted_users_feature"] and config["sample_part_voted_users"]:
-            debug("Sample part voted users as feature")
-            eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=True, data_info = test_data_info)
-            debug(eval_all_test_data=str(eval_all_test_data))
-            with open(config["log_path"], 'a') as log:
-                log.write(f"Evaluation result of the {model_type} model (sample part voted users as feature):" + str(eval_all_test_data)+"\n")
+    if config["use_voted_users_feature"] and config["sample_part_voted_users"]:
+        debug("Sample part voted users as feature")
+        eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=True, data_info = test_data_info)
+        debug(eval_all_test_data=str(eval_all_test_data))
+        with open(config["log_path"], 'a') as log:
+            log.write(f"Evaluation result of the {model_type} model (sample part voted users as feature):" + str(eval_all_test_data)+"\n")
     debug(config_path = args.config, log_path=config["log_path"])
