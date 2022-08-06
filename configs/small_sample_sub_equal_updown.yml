@@ -1,21 +1,21 @@
-sample_method: ['most_votes'] # , "add_weak_downvote"
+sample_method: ['SUBMISSION_ID', "equal_up_down_votes"] # , "add_weak_downvote"
 model_type: Transformer
 encoder_hidden_dim: 256
 language_model_encoder_name: prajjwal1/bert-mini
-sample_ratio: 0.005
+sample_ratio: 0.05
 train_at_least_n_votes: 0
 l2_normalization: 0.0001
-prepared_data_path: data/reddit/small_most_votes_no_peer_test_diff.pt
-train_test_different_submissions: True
+prepared_data_path: data/reddit/small_sample_sub_equal_updown.pt
+train_test_different_submissions: False
 learning_rate: 0.0001
 # load_pretrained_model: True
 num_epochs: 10
-downvote_weight: 20
+downvote_weight: 0.9
 user_normalization: equal_total
 
-batch_size: 512
+batch_size: 1024
 sample_part_voted_users: False
 use_voted_users_feature: False
 add_target_user_ratio: 0
-device: [0,1,2,3]
+device: [0,2,3]
 #  eval_all_test_data str len 1847: OrderedDict([('acc', 0.733761226526354), ('acc_vote_0', 0.6895117361592552), ('acc_vote_1', 0.746903956464186), ('acc_train_user_votes_num>=3', 0.7435997603979477), ('acc_vote_0_train_user_votes_num>=3', 0.6976444014198129), ('acc_vote_1_train_user_votes_num>=3', 0.7582817869415808), ('acc_train_submission_votes_num>=3', 0.8106512172023843), ('acc_vote_0_train_submission_votes_num>=3', 0.5537130497476568), ('acc_vote_1_train_submission_votes_num>=3', 0.8576134941029189), ('acc_train_user_votes_num<=3', 0.6743885357 ... .6369297351596944)])

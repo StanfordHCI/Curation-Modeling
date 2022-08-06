@@ -10,7 +10,7 @@ train_test_different_submissions: False
 learning_rate: 0.001
 num_epochs: 5
 downvote_weight: 4
-user_normalization: equal
+user_normalization: equal_total
 
 batch_size: 512
 sample_part_voted_users: False

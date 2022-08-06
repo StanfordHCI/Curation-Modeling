@@ -289,7 +289,28 @@ def get_test_data_info(train_data:pd.DataFrame, test_data:pd.DataFrame):
     test_data_info = pd.DataFrame()
     test_data_info["train_submission_votes_num"] = test_data.apply(lambda row:train_submission_votes_num[row["SUBMISSION_ID"]], axis = 1)
     test_data_info["train_user_votes_num"] = test_data.apply(lambda row:train_user_votes_num[row["USERNAME"]], axis = 1)
-    return test_data_info
+    
+    # calculate %upvote for each submission in train data
+    train_submissions = set(train_data["SUBMISSION_ID"])
+    train_submission_upvote_df = pd.DataFrame(np.zeros((len(train_submissions),2)), index = train_submissions, columns=['Upvote', 'Total'])
+    train_submissions = train_data["SUBMISSION_ID"].to_list()
+    train_votes = train_data["VOTE"].to_list()
+    for row_i, submission_id in enumerate(train_submissions):
+        vote = train_votes[row_i]
+        if submission_id in train_submissions and (vote == 1 or vote == 0):
+            train_submission_upvote_df.at[submission_id, "Total"] += 1
+            if vote == 1:
+                train_submission_upvote_df.at[submission_id, "Upvote"] += 1
+    train_submission_upvote_df["Upvote rate"] = train_submission_upvote_df["Upvote"] / train_submission_upvote_df["Total"]
+    train_submission_upvote_df["SUBMISSION_ID"] = train_submission_upvote_df.index
+    
+    # merge to test_data_info
+    test_data_info["SUBMISSION_ID"] = test_data["SUBMISSION_ID"]
+    test_data_info = test_data_info.merge(train_submission_upvote_df[["SUBMISSION_ID", "Upvote rate"]], on = "SUBMISSION_ID", how = "left")
+    test_data_info["same_vote_rate"] = test_data_info["Upvote rate"]
+    test_data_info.loc[test_data["VOTE"] == 0, "same_vote_rate"] = 1 - test_data_info.loc[test_data["VOTE"] == 0, "same_vote_rate"]
+    
+    return test_data_info, train_submission_upvote_df
 def collect_users_votes_data(train_data:pd.DataFrame, test_data:pd.DataFrame):
     voted_users = defaultdict(set)
     submission_ids = train_data["SUBMISSION_ID"].to_list()
@@ -323,7 +344,11 @@ def get_model_input(config):
     if config["save_and_load_prepared_data"] and os.path.exists(prepared_data_path):
         debug("Loading prepared data...")
         with open(prepared_data_path, "rb") as f:
-            target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = pickle.load(f)
+            file_content = pickle.load(f)
+            if len(file_content) == 9:
+                target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, train_submission_upvote_df, num_all_users = file_content
+            elif len(file_content) == 8:
+                target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = file_content
         categorical_features, string_features, target = get_selected_feature(config)
     else:
         debug("Preparing data...")
@@ -337,7 +362,7 @@ def get_model_input(config):
         debug(featured_data=featured_data)
         # all_feature_columns, feature_names, max_voted_users = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)
         train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"], train_test_different_submissions = config["train_test_different_submissions"])
-        test_data_info = get_test_data_info(train_data, test_data)
+        test_data_info, train_submission_upvote_df = get_test_data_info(train_data, test_data)
         # train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
         # test_model_input = {name:test_data[name] for name in feature_names if name in test_data}
         if config["use_voted_users_feature"]:
@@ -345,11 +370,11 @@ def get_model_input(config):
         # train_model_input, test_model_input = tokenize_submission_text(train_data, test_data, train_model_input, test_model_input, config)
         if config["save_and_load_prepared_data"]:
             with open(prepared_data_path, "wb") as f:
-                pickle.dump((target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users), f)
+                pickle.dump((target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, train_submission_upvote_df, num_all_users), f)
             debug(f"Prepared data saved to {prepared_data_path}")
-    return target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users
+    return target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, train_submission_upvote_df, num_all_users
 
 if __name__ == '__main__':
     args, config = parse_config()
-    target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = get_model_input(config)
+    target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, train_submission_upvote_df, num_all_users = get_model_input(config)
     debug(config_path=args.config)

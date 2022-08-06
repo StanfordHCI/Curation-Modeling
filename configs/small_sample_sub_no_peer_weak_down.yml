@@ -11,7 +11,7 @@ learning_rate: 0.0001
 # load_pretrained_model: True
 num_epochs: 10
 downvote_weight: 1.5
-user_normalization: equal
+user_normalization: equal_total
 loss_function: mse
 batch_size: 384
 sample_part_voted_users: False

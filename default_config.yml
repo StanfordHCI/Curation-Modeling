@@ -12,8 +12,9 @@ l2_normalization: 0.00001
 loss_function: binary_crossentropy
 eval_metrics: ["acc"] # ['binary_crossentropy', "auc", "acc"]
 # weight
-downvote_weight: 1
-user_normalization: equal # null for no normalization, equal for assigning user weight = 1/votes,
+downvote_weight: 3
+user_normalization: equal_total # null for no normalization, equal_total for assigning user weight = 1/votes, equal_upvote_downvote for equal upvote weight and downvote weight for each user!
+minority_vote_normalization: False
 # data processing
 save_and_load_prepared_data: True
 sample_ratio: 1
@@ -31,9 +32,9 @@ submission_text_dict_path: data/reddit/submission_text_dict.pt
 
 ### curation modeling
 upvote_downvote_ratio_thres: 0.9
-user_grouping_method: "neural" # or "votes", "single_user_as_group", "manual"
+user_grouping_method: "neural" # or "votes", "single_user_as_group", "manual", "predict_all_submissions"
 manual_user_groups: null
 active_user_votes_thres: 5
-group_user_num_lower_thres: 5
-group_user_num_upper_thres: 500
+group_user_num_lower_thres: 1
+group_user_num_upper_thres: 40
 preferred_submissions_venn_figure_dir: output/figures/preferred_subs

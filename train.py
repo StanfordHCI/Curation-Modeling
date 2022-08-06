@@ -10,7 +10,7 @@ import torch
 from superdebug import debug
 from sklearn.metrics import log_loss, roc_auc_score, accuracy_score
 from dynamic_data import get_data_loader
-from process_data import get_model_input
+from process_data import get_model_input, get_test_data_info
 from model import TransformerVoter, LinearModel, _accuracy_score
 from utils import get_config, load_model, save_model, to_device, parse_config
 from deepctr_torch.callbacks import ModelCheckpoint
@@ -26,14 +26,34 @@ import wandb
 import seaborn as sns
 
 
-def get_normalization_weights(data:pd.DataFrame, config):
-    upvote_downvote_weights = np.array(1 * (data["VOTE"] == 1) + config["downvote_weight"] * (data["VOTE"] != 1))
-    user_votes_counter = Counter(data["USERNAME"])
-    if config["user_normalization"] == "equal":
-        user_weights = np.array([100/user_votes_counter[x] for x in data["USERNAME"]])
-    else:
+def get_normalization_weights(data:pd.DataFrame, train_submission_upvote_df:pd.DataFrame, config):
+    # user_weights
+    if not config["user_normalization"]:
         user_weights = np.ones([len(data)])
-    normalization_weights = upvote_downvote_weights * user_weights
+    else:
+        if config["user_normalization"] == "equal_total":
+            user_column = data["USERNAME"]
+        elif config["user_normalization"] == "equal_upvote_downvote":
+            assert config["downvote_weight"] == 1
+            user_column = data.apply(lambda row:f"{row['USERNAME']}-{row['VOTE']}", axis=1)
+        user_column = user_column.to_list()
+        user_votes_counter = Counter(user_column)
+        user_weights = np.array([100/user_votes_counter[x] for x in user_column])
+        
+    # minority_weight, more same votes -> less weight
+    if config["minority_vote_normalization"]:
+        data = data.merge(train_submission_upvote_df[["SUBMISSION_ID", "Upvote rate"]], on = "SUBMISSION_ID", how = "left")
+        data["same_vote_rate"] = data["Upvote rate"]
+        data.loc[data["VOTE"] == 0, "same_vote_rate"] = 1 - data.loc[data["VOTE"] == 0, "same_vote_rate"]
+        minority_weight = 1/data["same_vote_rate"].to_numpy()
+        minority_weight[minority_weight > 10] = 10
+    else:
+        minority_weight = np.ones([len(data)])
+        
+    # upvote_downvote_weights
+    upvote_downvote_weights = np.array(1 * (data["VOTE"] != 0) + config["downvote_weight"] * (data["VOTE"] == 0))
+    
+    normalization_weights = upvote_downvote_weights * user_weights * minority_weight
     return normalization_weights
 
 def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
@@ -45,6 +65,7 @@ def apply_metric(metric_func, y_true, y_pred, sample_weight = None):
     else:
         val = metric_func(y_true, y_pred, sample_weight=sample_weight)
     return val
+
 categorical_features, string_features, target = None, None, None
 def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, epochs=1, verbose=1, initial_epoch=0, validation_split=0., shuffle=True, step_generator = False, n_step_per_sample = 1, extra_input = None):
     """
@@ -173,6 +194,8 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
     if simple or data_info is None:
         test_filter = {"": (data["VOTE"] >=-1).to_numpy()}
     else:
+        if "same_vote_rate" not in data_info.columns:
+            data_info, train_submission_upvote_df = get_test_data_info(train_data, test_data)
         test_filter = {"": (data["VOTE"] >=-1).to_numpy(), "_train_user_votes_num>=3": (data_info["train_user_votes_num"] >= 3).to_numpy(), "_train_submission_votes_num>=3": (data_info["train_submission_votes_num"] >= 3).to_numpy(), "_train_user_votes_num<=3": (data_info["train_user_votes_num"] <= 3).to_numpy(), "_train_submission_votes_num<=3": (data_info["train_submission_votes_num"] <= 3).to_numpy()} 
 
     # calculate all evaluation results
@@ -193,13 +216,19 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
     if (not simple) and (data_info is not None):
         train_user_votes_nums = data_info["train_user_votes_num"].to_numpy()
         train_submission_votes_nums = data_info["train_submission_votes_num"].to_numpy()
+        data_info["same_vote_rate"] = data_info["same_vote_rate"].fillna(-1)
+        train_same_vote_rates = (data_info["same_vote_rate"].round(2).to_numpy() * 100).astype(int)
         train_user_votes_num_acc_df = pd.DataFrame(np.zeros((max(train_user_votes_nums) + 1,3)), columns=['Acc', 'Confidence', 'Total'])
         train_submission_votes_num_acc_df = pd.DataFrame(np.zeros((max(train_submission_votes_nums) + 1,3)), columns=['Acc', 'Confidence', 'Total'])
+        train_same_vote_rate_acc_df = pd.DataFrame(np.zeros((101,3)), columns=['Acc', 'Confidence', 'Total'])
+
+        
         for vote_i, pred_score in enumerate(pred_ans):
             pred_vote = float(pred_score > 0.5)
             gt_vote = ground_truth[vote_i]
             train_user_votes_num = train_user_votes_nums[vote_i]
             train_submission_votes_num = train_submission_votes_nums[vote_i] 
+            train_same_vote_rate = train_same_vote_rates[vote_i]
 
             train_submission_votes_num_acc_df.at[train_submission_votes_num, "Acc"] += int(pred_vote == gt_vote)
             train_submission_votes_num_acc_df.at[train_submission_votes_num, "Confidence"] += abs(pred_score - 0.5)
@@ -208,12 +237,16 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
             train_user_votes_num_acc_df.at[train_user_votes_num, "Acc"] += int(pred_vote == gt_vote)
             train_user_votes_num_acc_df.at[train_user_votes_num, "Confidence"] += abs(pred_score - 0.5)
             train_user_votes_num_acc_df.at[train_user_votes_num, "Total"] += 1
+            
+            if train_same_vote_rate >= 0:
+                train_same_vote_rate_acc_df.at[train_same_vote_rate, "Acc"] += int(pred_vote == gt_vote)
+                train_same_vote_rate_acc_df.at[train_same_vote_rate, "Confidence"] += abs(pred_score - 0.5)
+                train_same_vote_rate_acc_df.at[train_same_vote_rate, "Total"] += 1
         
         train_submission_votes_num_acc_df = train_submission_votes_num_acc_df[train_submission_votes_num_acc_df["Total"] > 0]
         train_submission_votes_num_acc_df["Acc rate"] = train_submission_votes_num_acc_df["Acc"]/train_submission_votes_num_acc_df["Total"]
         train_submission_votes_num_acc_df["Avg confidence"] = train_submission_votes_num_acc_df["Confidence"]/train_submission_votes_num_acc_df["Total"]
-        train_submission_votes_num_acc_df["Total scaled"] = train_submission_votes_num_acc_df["Total"]/max(train_submission_votes_num_acc_df["Total"])
-        print(train_submission_votes_num_acc_df)
+        train_submission_votes_num_acc_df["Total scaled"] = train_submission_votes_num_acc_df["Total"]/len(pred_ans)
         sns.set_theme()
         sns.lineplot(data=train_submission_votes_num_acc_df[["Acc rate", "Avg confidence", "Total scaled"]], legend = "auto").set(title='Accuracy & confidence given different #votes on this post')
         plt.show()
@@ -221,9 +254,17 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
         train_user_votes_num_acc_df = train_user_votes_num_acc_df[train_user_votes_num_acc_df["Total"] > 0]
         train_user_votes_num_acc_df["Acc rate"] = train_user_votes_num_acc_df["Acc"]/train_user_votes_num_acc_df["Total"]
         train_user_votes_num_acc_df["Avg confidence"] = train_user_votes_num_acc_df["Confidence"]/train_user_votes_num_acc_df["Total"]
-        train_user_votes_num_acc_df["Total scaled"] = train_user_votes_num_acc_df["Total"]/max(train_user_votes_num_acc_df["Total"])
+        train_user_votes_num_acc_df["Total scaled"] = train_user_votes_num_acc_df["Total"]/len(pred_ans)
         sns.set_theme()
         sns.lineplot(data=train_user_votes_num_acc_df[["Acc rate", "Avg confidence", "Total scaled"]], legend = "auto").set(title='Accuracy & confidence given different #votes from this user')
+        plt.show()
+        
+        train_same_vote_rate_acc_df = train_same_vote_rate_acc_df[train_same_vote_rate_acc_df["Total"] > 0]
+        train_same_vote_rate_acc_df["Acc rate"] = train_same_vote_rate_acc_df["Acc"]/train_same_vote_rate_acc_df["Total"]
+        train_same_vote_rate_acc_df["Avg confidence"] = train_same_vote_rate_acc_df["Confidence"]/train_same_vote_rate_acc_df["Total"]
+        train_same_vote_rate_acc_df["Total scaled"] = train_same_vote_rate_acc_df["Total"]/len(pred_ans)
+        sns.set_theme()
+        sns.lineplot(data=train_same_vote_rate_acc_df[["Acc rate", "Avg confidence", "Total scaled"]], legend = "auto").set(title='Accuracy & confidence given different %votes that is same as the target vote')
         plt.show()
 
     model = model.train()
@@ -235,7 +276,7 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
 
 if __name__ == "__main__":
     args, config = parse_config(wandb)
-    target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, num_all_users = get_model_input(config)
+    target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, train_submission_upvote_df, num_all_users = get_model_input(config)
 
     if not args.test:
         if config["model_type"] == "Transformer":
@@ -243,7 +284,7 @@ if __name__ == "__main__":
         elif config["model_type"] == "linear":
             model = LinearModel(config, categorical_features, string_features, original_feature_map, num_all_users=num_all_users)
             
-        train_weights = get_normalization_weights(train_data, config)
+        train_weights = get_normalization_weights(train_data, train_submission_upvote_df, config)
         best_eval_acc, best_eval_acc_weight, latest_eval_acc, latest_eval_acc_weight, train_loss, train_acc = next(train_model(config, model, train_data, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2))
         wandb.alert(
             title="Finished training!", 
@@ -252,7 +293,7 @@ if __name__ == "__main__":
 
     model_type = "best"
     model, _, _, _, _ = load_model(config["save_model_dir"], model, model.optim, 0, 0, model_type)
-    test_weights = get_normalization_weights(test_data, config)
+    test_weights = get_normalization_weights(test_data, train_submission_upvote_df, config)
     if config["use_voted_users_feature"]: debug("Use all voted users as feature")
     eval_all_test_data = evaluate_model(config, model, data = test_data, weights = test_weights, batch_size=config['batch_size'], sample_voted_users=False, data_info = test_data_info)
     eval_result_str = "".join([f"- {key}: {value:.4f} " for key, value in eval_all_test_data.items()])
