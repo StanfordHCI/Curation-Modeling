@@ -5,18 +5,15 @@ import pandas as pd
 from superdebug import debug
 
 class RedditDataset(Dataset):
-    def __init__(self, config, data:pd.DataFrame, categorical_features, string_features, target, weight = None, sample_voted_users = None, interactive = False):
+    def __init__(self, config, data:pd.DataFrame, categorical_features, string_features, target, weight = None, sample_voted_users = None, add_target_user_ratio = 0, interactive = False):
         super(RedditDataset, self).__init__()
         self.data = data
         self.df_indices = self.data.index.to_numpy(int)
         self.categorical_features = categorical_features
         self.string_features = string_features
-        if sample_voted_users is not None:
-            self.sample_voted_users = sample_voted_users
-        else:
-            config["sample_voted_users"]
+        self.sample_voted_users = sample_voted_users
         self.use_voted_users_feature = config["use_voted_users_feature"]
-        self.add_target_user_ratio = config["add_target_user_ratio"]
+        self.add_target_user_ratio = add_target_user_ratio
         self.interactive = interactive
 
         self.featured_data = {}
@@ -123,8 +120,8 @@ class CollateFN:
         return input_ids, token_type_ids, attention_mask, labels, weights, df_indices
         # features.float(), labels.long(), lengths.long()
 
-def get_data_loader(config, data:pd.DataFrame, tokenizer, categorical_features, string_features, target, weight = None, interactive = False, sample_voted_users = True, shuffle=True, batch_size=256):
-    dataset = RedditDataset(config, data, categorical_features, string_features, target, weight=weight, sample_voted_users=sample_voted_users, interactive=interactive)
+def get_data_loader(config, data:pd.DataFrame, tokenizer, categorical_features, string_features, target, weight = None, interactive = False, sample_voted_users = True, add_target_user_ratio = 0, shuffle=True, batch_size=256):
+    dataset = RedditDataset(config, data, categorical_features, string_features, target, weight=weight, sample_voted_users=sample_voted_users, add_target_user_ratio=add_target_user_ratio, interactive=interactive)
     collate_fn = CollateFN(tokenizer)
     data_loader = DataLoader(dataset=dataset, shuffle=shuffle, batch_size=batch_size, collate_fn=collate_fn)
     return dataset, data_loader
