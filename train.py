@@ -88,7 +88,7 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
         weights, val_weights = weights[:split_at], weights[split_at:] # slice_arrays(weights, 0, split_at), slice_arrays(weights, split_at)
     else:
         val_data, val_weights = [], []
-    trainset, train_loader = get_data_loader(config, data, model.tokenizer, (categorical_features if extra_input is None else extra_input[0]), (string_features if extra_input is None else extra_input[1]), (target if extra_input is None else extra_input[2]), weight=weights, shuffle=shuffle, batch_size=batch_size)
+    trainset, train_loader = get_data_loader(config, data, model.tokenizer, (categorical_features if extra_input is None else extra_input[0]), (string_features if extra_input is None else extra_input[1]), (target if extra_input is None else extra_input[2]), weight=weights, sample_voted_users = config["sample_part_voted_users"], add_target_user_ratio = config["add_target_user_ratio"], shuffle=shuffle, batch_size=batch_size)
 
     model = model.train()
     optim = model.optim
@@ -175,7 +175,7 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
 
 def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=256, ret = "eval_result", sample_voted_users = False, data_info:pd.DataFrame = None, disable_tqdm = False, extra_input = None, simple = True):
     model = model.eval()
-    testset, test_loader = get_data_loader(config, data, model.tokenizer, (categorical_features if extra_input is None else extra_input[0]), (string_features if extra_input is None else extra_input[1]), (target if extra_input is None else extra_input[2]), weights, sample_voted_users=sample_voted_users, shuffle=False, batch_size=batch_size)
+    testset, test_loader = get_data_loader(config, data, model.tokenizer, (categorical_features if extra_input is None else extra_input[0]), (string_features if extra_input is None else extra_input[1]), (target if extra_input is None else extra_input[2]), weights, sample_voted_users=sample_voted_users, add_target_user_ratio = 0, shuffle=False, batch_size=batch_size)
     pred_ans = []
 
     if not disable_tqdm:

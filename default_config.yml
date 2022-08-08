@@ -36,7 +36,7 @@ submission_source: "custom" # "test_data" or "custom"
 user_grouping_method: "votes" # or "neural", "all_user_as_group", "single_user_as_group", "manual", "predict_all_submissions", "none", "votes all_user_as_group". "vote" for using voting matrix and PCA for clustering; "none" for no curation
 
 manual_user_groups: null
-active_user_votes_thres: 3
+active_user_votes_thres: 5
 group_user_num_lower_thres: 1
 group_user_num_upper_thres: 40
 preferred_submissions_venn_figure_dir: output/figures/preferred_subs
