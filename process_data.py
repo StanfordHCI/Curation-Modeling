@@ -137,7 +137,7 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
             vote_data_list = [vote_data]
             created_times_data = vote_data[["CREATED_TIME", "SUBMISSION_ID"]]
             created_times_data = created_times_data.drop_duplicates(subset = "SUBMISSION_ID")
-            created_times_data.loc[:, "CREATED_TIME"] = created_times_data["CREATED_TIME"].fillna(0) # TODO: so slow! change to first calculate the nearby times of created_times
+            created_times_data.loc[:, "CREATED_TIME"] = created_times_data["CREATED_TIME"].fillna(0)
             # created_times_data.loc[:, "ORDER"] = list(range(len(created_times_data)))
 
             created_times = created_times_data["CREATED_TIME"].to_list()
@@ -208,11 +208,15 @@ def clean_data(data:pd.DataFrame, categorical_features, string_features):
 def transform_features(data, categorical_features, string_features, target):
     original_feature_map = defaultdict(dict)
     debug(f"Transforming features in {categorical_features}")
+    user_lbe = LabelEncoder().fit(data["USERNAME"].to_list()+data["AUTHOR"].to_list())
     for feature_name in categorical_features:
         if feature_name in data:
-            lbe = LabelEncoder()
             original_features = data[feature_name]
-            data[feature_name] = lbe.fit_transform(original_features)
+            if feature_name == "USERNAME" or feature_name == "AUTHOR":
+                data[feature_name] = user_lbe.transform(original_features)
+            else:
+                lbe = LabelEncoder()
+                data[feature_name] = lbe.fit_transform(original_features)
             for i, transformed_feature in enumerate(data[feature_name]):
                 if transformed_feature not in original_feature_map[feature_name]:
                     original_feature_map[feature_name][transformed_feature] = original_features[i]
