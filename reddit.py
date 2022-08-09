@@ -18,6 +18,15 @@ DBSession = sessionmaker(bind=engine)
 session = DBSession()
 
 Base = declarative_base()
+
+pmaw_api = PushshiftAPI()
+reddit = praw.Reddit(
+    client_id="kmyK_5R42klZo-WpcwX1xA",
+    client_secret="L7Wj40LXF7d8StPvESo9vpzxo3wAzw",
+    password="Azvrdtlibera4",
+    user_agent="testscript by u/Azure-Vision",
+    username="Azure-Vision",
+)
 class Submissions(Base):
     __tablename__ = 'submissions'
     id = Column(String, primary_key=True, autoincrement=True)
@@ -154,19 +163,32 @@ def get_batch_submission_text(submission_ids):
             submission_id_text_map[item.id] = item.text
     return [submission_id_text_map.get(id, "") for id in submission_ids]
 
+def get_user_info(username):
+    try:
+        user = praw.models.Redditor(reddit, username)
+        user_info = {
+            "mod": user.is_mod,
+            "gold": user.is_gold,
+            "employee": user.is_employee,
+            "comment_karma": user.comment_karma,
+            "link_karma": user.link_karma,
+        }
+        _user_info = {key: ("✅" if value else "❌") if type(value)==bool else value for key, value in user_info.items()}
+        user_info_str = " ".join([f"{key}: {value}" for key, value in _user_info.items()])
+        return user_info, user_info_str
+    except:
+        return {}, ""
+    
 if __name__ == "__main__":
-    pmaw_api = PushshiftAPI()
-    reddit = praw.Reddit(
-        client_id="kmyK_5R42klZo-WpcwX1xA",
-        client_secret="L7Wj40LXF7d8StPvESo9vpzxo3wAzw",
-        password="Azvrdtlibera4",
-        user_agent="testscript by u/Azure-Vision",
-        username="Azure-Vision",
-    )
     print(reddit.user.me())
+    
+    """ # store all submission text
     vote_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t')
     debug("Read vote data!")
     store_all_submission_text(vote_data['SUBMISSION_ID'], ret = "dict")
-
+    """
+    
+    print(get_user_info("Azure-Vision"))
+    
 
     
