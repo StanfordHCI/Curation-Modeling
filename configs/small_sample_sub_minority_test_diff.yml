@@ -10,7 +10,7 @@ train_test_different_submissions: True
 learning_rate: 0.0001
 # load_pretrained_model: True
 num_epochs: 10
-downvote_weight: 1.2
+downvote_weight: 3
 user_normalization: equal_upvote_downvote # equal upvote weight and downvote weight for each user!
 minority_vote_normalization: True
 

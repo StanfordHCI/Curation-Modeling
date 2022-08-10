@@ -34,7 +34,6 @@ def get_normalization_weights(data:pd.DataFrame, train_submission_upvote_df:pd.D
         if config["user_normalization"] == "equal_total":
             user_column = data["USERNAME"]
         elif config["user_normalization"] == "equal_upvote_downvote":
-            assert config["downvote_weight"] == 1
             user_column = data.apply(lambda row:f"{row['USERNAME']}-{row['VOTE']}", axis=1)
         user_column = user_column.to_list()
         user_votes_counter = Counter(user_column)
