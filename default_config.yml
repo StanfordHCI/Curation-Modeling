@@ -31,7 +31,8 @@ submission_text_dict_path: data/reddit/submission_text_dict.pt
 
 
 ### curation modeling
-upvote_downvote_ratio_thres: 0.5
+upvote_ratio_thres: 0.5
+upvote_confidence_thres: 0
 submission_source: "test_data" # "test_data" or "custom"
 user_grouping_method: "votes" # or "neural", "all_user_as_group", "single_user_as_group", "manual", "predict_all_submissions", "none", "votes all_user_as_group". "vote" for using voting matrix and PCA for clustering; "none" for no curation
 
