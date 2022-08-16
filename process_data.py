@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 from tqdm import tqdm
-
+import swifter
 from reddit import get_batch_submission_text, get_single_submission_text 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
@@ -173,6 +173,7 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
             vote_data = pd.concat(vote_data_list, axis = 0)
             debug(new_vote_data_len = len(vote_data))
 
+    debug("Loading data/reddit/submission_info.txt")
     submission_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t') # each submission is a separate post and have a forest of comments
     # SUBMISSION_ID	SUBREDDIT	TITLE	AUTHOR	#_COMMENTS	NSFW	SCORE	UPVOTED_%	LINK
     # t3_d8vv6s	japanpics	Gloomy day in Kyoto	DeanTheDoge	13		1303	0.98	https://www.reddit.com/r/japanpics/comments/d8vv6s/gloomy_day_in_kyoto/
@@ -194,6 +195,7 @@ def get_selected_feature(config):
     return categorical_features, string_features, target
 
 def clean_data(data:pd.DataFrame, categorical_features, string_features):
+    debug("Data cleaning...")
     categorical_features = [feat for feat in categorical_features if feat in data]
     string_features = [feat for feat in string_features if feat in data]
     if "NSFW" in string_features:
@@ -291,22 +293,28 @@ def get_test_data_info(train_data:pd.DataFrame, test_data:pd.DataFrame):
     train_submission_votes_num = Counter(train_data["SUBMISSION_ID"])
     train_user_votes_num = Counter(train_data["USERNAME"])
     test_data_info = pd.DataFrame()
-    test_data_info["train_submission_votes_num"] = test_data.apply(lambda row:train_submission_votes_num[row["SUBMISSION_ID"]], axis = 1)
-    test_data_info["train_user_votes_num"] = test_data.apply(lambda row:train_user_votes_num[row["USERNAME"]], axis = 1)
+    test_data_info["train_submission_votes_num"] = test_data["SUBMISSION_ID"].swifter.apply(lambda sub_id:train_submission_votes_num[sub_id])
+    test_data_info["train_user_votes_num"] = test_data["USERNAME"].swifter.apply(lambda username:train_user_votes_num[username])
     
     # calculate %upvote for each submission in train data
     train_submissions = set(train_data["SUBMISSION_ID"])
     train_submission_upvote_df = pd.DataFrame(np.zeros((len(train_submissions),2)), index = train_submissions, columns=['Upvote', 'Total'])
-    train_submissions = train_data["SUBMISSION_ID"].to_list()
-    train_votes = train_data["VOTE"].to_list()
-    for row_i, submission_id in enumerate(train_submissions):
-        vote = train_votes[row_i]
-        if submission_id in train_submissions and (vote == 1 or vote == 0):
-            train_submission_upvote_df.at[submission_id, "Total"] += 1
-            if vote == 1:
-                train_submission_upvote_df.at[submission_id, "Upvote"] += 1
-    train_submission_upvote_df["Upvote rate"] = train_submission_upvote_df["Upvote"] / train_submission_upvote_df["Total"]
+    train_submissions = train_data["SUBMISSION_ID"][train_data["VOTE"].isin({0, 1})].to_list()
+    total_vote_counter = Counter(train_submissions)
+    train_submissions_upvote = train_data["SUBMISSION_ID"][train_data["VOTE"] == 1].to_list()
+    total_upvote_counter = Counter(train_submissions_upvote)
     train_submission_upvote_df["SUBMISSION_ID"] = train_submission_upvote_df.index
+    train_submission_upvote_df["Upvote"] = train_submission_upvote_df["SUBMISSION_ID"].swifter.apply(lambda x: total_upvote_counter[x])
+    train_submission_upvote_df["Total"] = train_submission_upvote_df["SUBMISSION_ID"].swifter.apply(lambda x: total_vote_counter[x])
+    
+    # train_votes = train_data["VOTE"].to_list()
+    # for row_i, submission_id in enumerate(tqdm(train_submissions)):
+    #     vote = train_votes[row_i]
+    #     if submission_id in train_submissions and (vote == 1 or vote == 0):
+    #         train_submission_upvote_df.at[submission_id, "Total"] += 1
+    #         if vote == 1:
+    #             train_submission_upvote_df.at[submission_id, "Upvote"] += 1
+    train_submission_upvote_df["Upvote rate"] = train_submission_upvote_df["Upvote"] / train_submission_upvote_df["Total"]
     
     # merge to test_data_info
     test_data_info["SUBMISSION_ID"] = test_data["SUBMISSION_ID"]
@@ -316,30 +324,31 @@ def get_test_data_info(train_data:pd.DataFrame, test_data:pd.DataFrame):
     
     return test_data_info, train_submission_upvote_df
 def collect_users_votes_data(train_data:pd.DataFrame, test_data:pd.DataFrame):
-    voted_users = defaultdict(set)
+    voted_users = defaultdict(set) # TODO: output intermediate results, serialize them out
     submission_ids = train_data["SUBMISSION_ID"].to_list()
     usernames = train_data["USERNAME"].to_list()
     votes = train_data["VOTE"].to_list()
     for idx, sub_id in enumerate(tqdm(submission_ids)):
         voted_users[f'{sub_id}-{votes[idx]}'].add(usernames[idx])
-    train_data["UPVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)
-    train_data["DOWNVOTED_USERS"] = train_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-0'] - {r["USERNAME"]}), axis=1)
-    test_data["UPVOTED_USERS"] = test_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-1'] - {r["USERNAME"]}), axis=1)
-    test_data["DOWNVOTED_USERS"] = test_data.apply(lambda r:list(voted_users[f'{r["SUBMISSION_ID"]}-0'] - {r["USERNAME"]}), axis=1)
-    return train_data, test_data
+    train_data["UPVOTED_USERS"] = train_data["SUBMISSION_ID"].swifter.apply(lambda r:voted_users[f'{r}-1'])
+    train_data["USERNAME_"] = train_data["USERNAME"].swifter.apply(lambda r: {r})
+    train_data["UPVOTED_USERS"] = train_data["UPVOTED_USERS"] - train_data["USERNAME_"]
+    train_data["UPVOTED_USERS"] = train_data["UPVOTED_USERS"].swifter.apply(lambda r: list(r))
     
-"""
-def tokenize_submission_text(train_data:pd.DataFrame, test_data:pd.DataFrame, train_model_input, test_model_input, config):
-    if "SUBMISSION_TEXT" in train_data.columns:
-        train_submission_text = list(train_data["SUBMISSION_TEXT"])
-        test_submission_text = list(test_data["SUBMISSION_TEXT"])
-        tokenizer = get_tokenizer(config)
-        train_tokenized_submission_text = tokenizer(train_submission_text, padding=True, truncation=True, max_length=512, return_tensors="pt") # contains: input_ids, token_type_ids, attention_mask
-        test_tokenized_submission_text = tokenizer(test_submission_text, padding=True, truncation=True, max_length=512, return_tensors="pt")
-        train_model_input.update(train_tokenized_submission_text)
-        test_model_input.update(test_tokenized_submission_text)
-    return train_model_input, test_model_input
-"""
+    train_data["DOWNVOTED_USERS"] = train_data["SUBMISSION_ID"].swifter.apply(lambda r:voted_users[f'{r}-0'])
+    train_data["DOWNVOTED_USERS"] = train_data["DOWNVOTED_USERS"] - train_data["USERNAME_"]
+    train_data["DOWNVOTED_USERS"] = train_data["DOWNVOTED_USERS"].swifter.apply(lambda r: list(r))
+    
+    test_data["UPVOTED_USERS"] = test_data["SUBMISSION_ID"].swifter.apply(lambda r:voted_users[f'{r}-1'])
+    test_data["USERNAME_"] = test_data["USERNAME"].swifter.apply(lambda r: {r})
+    test_data["UPVOTED_USERS"] = test_data["UPVOTED_USERS"] - test_data["USERNAME_"]
+    test_data["UPVOTED_USERS"] = test_data["UPVOTED_USERS"].swifter.apply(lambda r: list(r))
+    
+    test_data["DOWNVOTED_USERS"] = test_data["SUBMISSION_ID"].swifter.apply(lambda r:voted_users[f'{r}-0'])
+    test_data["DOWNVOTED_USERS"] = test_data["DOWNVOTED_USERS"] - test_data["USERNAME_"]
+    test_data["DOWNVOTED_USERS"] = test_data["DOWNVOTED_USERS"].swifter.apply(lambda r: list(r))
+    return train_data, test_data
+
 
 def get_model_input(config):
     prepared_data_path = config["prepared_data_path"]
