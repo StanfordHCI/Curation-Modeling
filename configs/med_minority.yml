@@ -2,23 +2,23 @@ sample_method: ["SUBMISSION_ID"]
 model_type: Transformer
 encoder_hidden_dim: 256
 language_model_encoder_name: prajjwal1/bert-mini
-sample_ratio: 0.2
+sample_ratio: 0.05
 train_at_least_n_votes: 0
 l2_normalization: 0.0001
-prepared_data_path: data/reddit/full_minority.pt
+prepared_data_path: data/reddit/med_minority.pt
 train_test_different_submissions: False
 learning_rate: 0.0001
 # load_pretrained_model: True
 num_epochs: 10
-downvote_weight: 1
+downvote_weight: 0.65
 user_normalization: equal_upvote_downvote # equal upvote weight and downvote weight for each user!
 minority_vote_normalization: True
 
-batch_size: 256
+batch_size: 96
 sample_part_voted_users: False
 use_voted_users_feature: True
 add_target_user_ratio: 0
-device: [0,3]
+device: [2]
 submission_source: "test_data" # "test_data" or "custom"
 
 # ('acc', 0.7982442424107044), ('acc_vote_0', 0.780350138716158), ('acc_vote_1', 0.8036952847234365), ('_train_user_votes_num>=3', 0), ('binary_crossentropy_train_user_votes_num>=3', 0.4317798819766979), ('binary_crossentropy_vote_0_train_user_votes_num>=3', 0.47891513737552194 ... .7185545966975061)])

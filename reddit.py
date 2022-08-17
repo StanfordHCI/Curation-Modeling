@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
-submission_text_path = "data/reddit/submission_text.db"
+submission_text_path = "data/reddit/submission_text_url.db"
 engine = create_engine(f"sqlite:///{submission_text_path}")
 DBSession = sessionmaker(bind=engine)
 session = DBSession()
@@ -31,6 +31,7 @@ class Submissions(Base):
     __tablename__ = 'submissions'
     id = Column(String, primary_key=True, autoincrement=True)
     text = Column(String)
+    url = Column(String)
 
 def get_single_submission_text(submission_id):
     submission_id = submission_id.split("_")[-1]
@@ -45,12 +46,13 @@ def get_single_submission_text(submission_id):
             selftext = submission.selftext
             if selftext != "":
                 submission_text += " [SEP] " + selftext
+            submission_url = submission.url
             success = True
         except Exception as e:
             print(f"Error: {e}")
             try_time += 1
             time.sleep(5)
-    return submission_text
+    return submission_text, submission_url
     debug(submission_title = submission.title, submission_texts=submission.selftext)
     first_comment = submission.comments._comments[0]
     debug(first_comment_text = first_comment.body)
@@ -93,27 +95,34 @@ def get_batch_submission_text(submission_ids, submission_text_dict_path):
 """
 def store_batch_submission_text_praw(submission_ids):
     submission_texts = []
+    submission_urls = []
     i = 0
     try:
         for submission in reddit.info(fullnames=submission_ids):
             while submission_ids[i].split("_")[-1] != submission.id:
                 submission_texts.append("")
+                submission_urls.append("")
                 i += 1
             submission_text = submission.title
             selftext = submission.selftext
             if selftext != "":
                 submission_text += " [SEP] " + selftext
+            submission_url = submission.url
             submission_texts.append(submission_text)
+            submission_urls.append(submission_url)
             i += 1
+        assert len(submission_texts) == len(submission_urls)
         submission_texts.extend([""] * (len(submission_ids) - len(submission_texts)))
+        submission_urls.extend([""] * (len(submission_ids) - len(submission_urls)))
     except:
         for submission_id in submission_ids:
-            submission_text = get_single_submission_text(submission_id)
+            submission_text, submission_url = get_single_submission_text(submission_id)
             submission_texts.append(submission_text)
+            submission_urls.append(submission_url)
     # submission_id_text_map = {}
     for i in range(len(submission_ids)):
         # submission_id_text_map[submission_ids[i]] = submission_texts[i]
-        session.add(Submissions(id=submission_ids[i], text=submission_texts[i]))
+        session.add(Submissions(id=submission_ids[i], text=submission_texts[i], url=submission_urls[i]))
     session.commit()
     # return submission_id_text_map
 
@@ -122,16 +131,16 @@ def store_batch_submission_text_pmaw(submission_ids):
     remain_ids = set(submission_ids)
     existing_ids = session.query(Submissions.id).filter(Submissions.id.in_(remain_ids)).all()
     remain_ids = remain_ids - {_[0] for _ in existing_ids}
-    # submission_id_text_map = {}
     posts = pmaw_api.search_submissions(ids=list(remain_ids))
     for post in tqdm(posts):
         submission_id = post["id"]
         submission_text = post["title"]
+        submission_url = post["url"]
         if "selftext" in post and post["selftext"] != "":
             submission_text += " [SEP] " + post["selftext"]
         # submission_id_text_map[short_id_map[submission_id]] = submission_text
         if short_id_map[submission_id] in remain_ids:
-            session.add(Submissions(id=short_id_map[submission_id], text=submission_text))
+            session.add(Submissions(id=short_id_map[submission_id], text=submission_text, url=submission_url))
             remain_ids.remove(short_id_map[submission_id])
     session.commit()
     return remain_ids # submission_id_text_map, 
@@ -139,11 +148,9 @@ def store_batch_submission_text_pmaw(submission_ids):
 def store_all_submission_text(submission_ids, batch_size = 10000, ret = "list"):
     submission_ids = list(submission_ids) # [id.split("_")[-1] for id in list(submission_ids)]
     remain_ids = set()
-    """
     for start_i in tqdm(range(0, len(submission_ids), batch_size)):
         batch_remains = store_batch_submission_text_pmaw(submission_ids[start_i : start_i + batch_size])
         remain_ids.update(batch_remains)
-    """
     remain_ids = set(submission_ids)
     for start_i in tqdm(range(0, len(submission_ids), batch_size)):
         existing_ids = session.query(Submissions.id).filter(Submissions.id.in_(set(submission_ids[start_i : start_i + batch_size]))).all()
@@ -157,11 +164,13 @@ def store_all_submission_text(submission_ids, batch_size = 10000, ret = "list"):
     pickle.dump(remain_ids, open("data/reddit/tmp_remain_ids.pt", "wb"))
 def get_batch_submission_text(submission_ids):
     submission_id_text_map = {}
+    submission_id_url_map = {}
     for start_i in range(0, len(submission_ids), 10000):
         existing_items = session.query(Submissions).filter(Submissions.id.in_(submission_ids[start_i:start_i + 10000])).all()
         for item in existing_items:
             submission_id_text_map[item.id] = item.text
-    return [submission_id_text_map.get(id, "") for id in submission_ids]
+            submission_id_url_map[item.id] = item.url
+    return [submission_id_text_map.get(id, "") for id in submission_ids], [submission_id_url_map.get(id, "") for id in submission_ids]
 
 def get_user_info(username):
     try:
@@ -181,14 +190,13 @@ def get_user_info(username):
     
 if __name__ == "__main__":
     print(reddit.user.me())
-    
-    """ # store all submission text
+    # store_batch_submission_text_pmaw(["t3_ds9jwb"])
+    # store all submission text
     vote_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t')
     debug("Read vote data!")
     store_all_submission_text(vote_data['SUBMISSION_ID'], ret = "dict")
-    """
     
-    print(get_user_info("Azure-Vision"))
+    # print(get_user_info("Azure-Vision"))
     
 
     
