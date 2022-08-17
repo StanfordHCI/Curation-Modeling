@@ -2,6 +2,7 @@ import random
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
+from urllib.parse import urlparse
 from superdebug import debug
 
 class RedditDataset(Dataset):
@@ -21,6 +22,8 @@ class RedditDataset(Dataset):
             self.featured_data[feat] = data[feat].to_numpy(int)
         for feat in self.string_features:
             self.featured_data[feat] = data[feat].to_list()
+            if feat == "SUBMISSION_URL":
+                self.featured_data[feat] = [urlparse(_).netloc for _ in self.featured_data[feat]]
         if self.use_voted_users_feature:
             for feat in ["UPVOTED_USERS", "DOWNVOTED_USERS"]:
                 self.featured_data[feat] = data[feat].to_list()
