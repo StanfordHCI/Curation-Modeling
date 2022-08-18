@@ -1,4 +1,5 @@
 sample_method: ['SUBMISSION_ID'] # , "add_weak_downvote"
+string_features: ['SUBREDDIT', "CREATED_TIME", 'NSFW', "SUBMISSION_TEXT"]
 model_type: Transformer
 encoder_hidden_dim: 256
 language_model_encoder_name: prajjwal1/bert-mini

@@ -36,7 +36,8 @@ class Submissions(Base):
 def get_single_submission_text(submission_id):
     submission_id = submission_id.split("_")[-1]
     # submission=reddit.submission(url = "https://www.reddit.com/r/houston/comments/e7gje4/downtown_houston_at_sunset/")
-    submission_text = ""
+    submission_text = submission_title_map[submission_id]
+    submission_url = ""
     success = False
     try_time = 0
     while not success and try_time < 5:
@@ -146,11 +147,11 @@ def store_batch_submission_text_pmaw(submission_ids):
     return remain_ids # submission_id_text_map, 
 
 def store_all_submission_text(submission_ids, batch_size = 10000, ret = "list"):
-    submission_ids = list(submission_ids) # [id.split("_")[-1] for id in list(submission_ids)]
-    remain_ids = set()
-    for start_i in tqdm(range(0, len(submission_ids), batch_size)):
-        batch_remains = store_batch_submission_text_pmaw(submission_ids[start_i : start_i + batch_size])
-        remain_ids.update(batch_remains)
+    # submission_ids = list(submission_ids) # [id.split("_")[-1] for id in list(submission_ids)]
+    # remain_ids = set()
+    # for start_i in tqdm(range(0, len(submission_ids), batch_size)):
+    #     batch_remains = store_batch_submission_text_pmaw(submission_ids[start_i : start_i + batch_size])
+    #     remain_ids.update(batch_remains)
     remain_ids = set(submission_ids)
     for start_i in tqdm(range(0, len(submission_ids), batch_size)):
         existing_ids = session.query(Submissions.id).filter(Submissions.id.in_(set(submission_ids[start_i : start_i + batch_size]))).all()
@@ -193,6 +194,7 @@ if __name__ == "__main__":
     # store_batch_submission_text_pmaw(["t3_ds9jwb"])
     # store all submission text
     vote_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t')
+    submission_title_map = vote_data[["SUBMISSION_ID", "TITLE"]].set_index("SUBMISSION_ID").to_dict()["TITLE"]
     debug("Read vote data!")
     store_all_submission_text(vote_data['SUBMISSION_ID'], ret = "dict")
     
