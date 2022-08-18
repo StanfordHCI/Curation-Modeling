@@ -21,9 +21,10 @@ class RedditDataset(Dataset):
         for feat in self.categorical_features:
             self.featured_data[feat] = data[feat].to_numpy(int)
         for feat in self.string_features:
-            self.featured_data[feat] = data[feat].to_list()
-            if feat == "SUBMISSION_URL":
-                self.featured_data[feat] = [urlparse(_).netloc for _ in self.featured_data[feat]]
+            if feat in data:
+                self.featured_data[feat] = data[feat].to_list()
+                if feat == "SUBMISSION_URL":
+                    self.featured_data[feat] = [urlparse(_).netloc for _ in self.featured_data[feat]]
         if self.use_voted_users_feature:
             for feat in ["UPVOTED_USERS", "DOWNVOTED_USERS"]:
                 self.featured_data[feat] = data[feat].to_list()
@@ -83,8 +84,9 @@ class RedditDataset(Dataset):
             strings.append(f"[{feat}]")
             strings.append(f"{feat}_{self.featured_data[feat][idx]}")
         for feat in self.string_features:
-            strings.append(f"[{feat}]")
-            strings.append(str(self.featured_data[feat][idx]))
+            if feat in self.featured_data:
+                strings.append(f"[{feat}]")
+                strings.append(str(self.featured_data[feat][idx]))
         if self.use_voted_users_feature:
             target_user = self.featured_data["USERNAME"][idx]
             for vote in ["upvote", "downvote"]:
