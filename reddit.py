@@ -34,9 +34,9 @@ class Submissions(Base):
     url = Column(String)
 
 def get_single_submission_text(submission_id):
+    submission_text = submission_title_map[submission_id]
     submission_id = submission_id.split("_")[-1]
     # submission=reddit.submission(url = "https://www.reddit.com/r/houston/comments/e7gje4/downtown_houston_at_sunset/")
-    submission_text = submission_title_map[submission_id]
     submission_url = ""
     success = False
     try_time = 0
@@ -121,6 +121,7 @@ def store_batch_submission_text_praw(submission_ids):
             submission_texts.append(submission_text)
             submission_urls.append(submission_url)
     # submission_id_text_map = {}
+    session.query(Submissions).filter(Submissions.id.in_(submission_ids)).delete()
     for i in range(len(submission_ids)):
         # submission_id_text_map[submission_ids[i]] = submission_texts[i]
         session.add(Submissions(id=submission_ids[i], text=submission_texts[i], url=submission_urls[i]))
@@ -152,17 +153,16 @@ def store_all_submission_text(submission_ids, batch_size = 10000, ret = "list"):
     # for start_i in tqdm(range(0, len(submission_ids), batch_size)):
     #     batch_remains = store_batch_submission_text_pmaw(submission_ids[start_i : start_i + batch_size])
     #     remain_ids.update(batch_remains)
-    remain_ids = set(submission_ids)
-    for start_i in tqdm(range(0, len(submission_ids), batch_size)):
-        existing_ids = session.query(Submissions.id).filter(Submissions.id.in_(set(submission_ids[start_i : start_i + batch_size]))).all()
-        remain_ids = remain_ids - {_[0] for _ in existing_ids}
-    
+    # remain_ids = set(submission_ids)
+    # for start_i in tqdm(range(0, len(submission_ids), batch_size)):
+    #     existing_ids = session.query(Submissions.id).filter(Submissions.id.in_(set(submission_ids[start_i : start_i + batch_size]))).all()
+    #     remain_ids = remain_ids - {_[0] for _ in existing_ids}
+    remain_ids = pickle.load(open("data/reddit/tmp_remain_ids.pt", "rb"))
     if len(remain_ids) > 0:
         remain_ids = list(remain_ids)
         for start_i in tqdm(range(0, len(remain_ids), batch_size)):
             store_batch_submission_text_praw(remain_ids[start_i : start_i + batch_size])
-    return
-    pickle.dump(remain_ids, open("data/reddit/tmp_remain_ids.pt", "wb"))
+    # pickle.dump(remain_ids, open("data/reddit/tmp_remain_ids.pt", "wb"))
 def get_batch_submission_text(submission_ids):
     submission_id_text_map = {}
     submission_id_url_map = {}

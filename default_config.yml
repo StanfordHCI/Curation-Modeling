@@ -18,7 +18,8 @@ minority_vote_normalization: False
 # data processing
 save_and_load_prepared_data: True
 sample_ratio: 1
-sample_method: ['most_votes'] # , "equal_up_down_votes", "add_weak_downvote"
+sample_method: ['most_votes'] # , "equal_up_down_votes", "add_weak_downvote", "selected_subreddits"
+selected_subreddits: ["r/politics"]
 categorical_features: ['USERNAME', 'AUTHOR'] # 'SUBMISSION_ID' #! make sure "USERNAME" is the first one
 string_features: ['SUBREDDIT', "CREATED_TIME", 'NSFW', "SUBMISSION_URL", "SUBMISSION_TEXT"]
 use_voted_users_feature: True # will add "UPVOTED_USERS" and "DOWNVOTED_USERS"
@@ -31,13 +32,15 @@ submission_text_dict_path: data/reddit/submission_text_dict.pt
 
 
 ### curation modeling
+selected_subreddit: null # Select a Subreddit, e.g., "r/politics", or select multiple subreddits, e.g., "r/politics_r/Conservative_r/Liberal_r/Republican_r/democrats_r/VoteBlue". null: select later. 
 upvote_ratio_thres: 0.5
 upvote_confidence_thres: 0
 submission_source: "test_data" # "test_data" or "custom"
-user_grouping_method: "votes" # or "neural", "all_user_as_group", "single_user_as_group", "manual", "predict_all_submissions", "none", "votes all_user_as_group". "vote" for using voting matrix and PCA for clustering; "none" for no curation
-
+user_grouping_method: "votes" # or "neural", "all_user_as_group", "random_user_as_group", "single_user_as_group", "manual", "interest_r/Conservative_r/Liberal_r/Republican_r/democrats_r/VoteBlue", "predict_all_submissions", "none", "votes", or their combination (separate them with space). "vote" for using voting matrix and PCA for clustering; "none" for no curation
 manual_user_groups: null
-active_user_votes_thres: 2
+analyze_post: True # whether to do sentiment analysis, classification and entities analysis
+max_test_submissions_per_subreddit: 500
+active_user_votes_thres: 5
 group_user_num_lower_thres: 1
 group_user_num_upper_thres: 40
 preferred_submissions_venn_figure_dir: output/figures/preferred_subs
