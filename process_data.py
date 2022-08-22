@@ -60,12 +60,12 @@ def find_correlated_user_pairs(vote_data, num_same_posts_thres):
             selected_users.update(user_pair[0])
     return user_pair_agreement_level, correlated_user_pairs, selected_users
 
-def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USERNAME'):
+def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USERNAME', config=None):
     vote_data = pd.read_csv('data/reddit/44_million_votes.txt', sep = '\t')
     # SUBMISSION_ID SUBREDDIT    CREATED_TIME    USERNAME    VOTE
     # t3_e0i7l4	r/nagatoro		TeddehBear	upvote
     vote_data['SUBMISSION_ID'] = vote_data['SUBMISSION_ID'].astype(str)
-    debug(vote_data_num = len(vote_data))
+    vote_data_num = len(vote_data)
 
     if type(sample_method) == str:
         sample_method = [sample_method]
@@ -88,11 +88,16 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
         elif "correlated_user_pairs" in sample_method:
             user_pair_agreement_level, correlated_user_pairs, selected_entries = find_correlated_user_pairs(vote_data, num_same_posts_thres=30)
             sample_column = "USERNAME"
+        elif "selected_subreddits" in sample_method:
+            sample_column = "SUBREDDIT"
+            selected_entries = config["selected_subreddits"]
         elif "USERNAME" in sample_method:
             sample_column = "USERNAME"
         elif "SUBMISSION_ID" in sample_method:
             sample_column = "SUBMISSION_ID"
-        if "most_votes" not in sample_method:
+            
+            
+        if "most_votes" not in sample_method and selected_entries is None:
             debug(f"Sampling {sample_ratio} of the {sample_column}s...")
         # sample x% of the users/submissions, include all the voting data involving these users/submissions
         if selected_entries is None:
@@ -100,7 +105,7 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
             random.seed(42)
             selected_entries = set(random.sample(list(all_entries), k = int(sample_ratio * len(all_entries))))
         vote_data = vote_data[vote_data[sample_column].isin(selected_entries)] 
-        debug(vote_data_num = len(vote_data))
+        debug(f"#Voting data left: {len(vote_data)} ({len(vote_data)/vote_data_num * 100:.4f}% of {vote_data_num})")
 
     if "equal_up_down_votes" in sample_method or "add_weak_downvote" in sample_method:
         vote_data = vote_data.sort_values(by=['CREATED_TIME']).reset_index(drop = True)
@@ -365,7 +370,7 @@ def get_model_input(config):
         categorical_features, string_features, target = get_selected_feature(config)
     else:
         debug("Preparing data...")
-        all_data = sample_load_dataset(config["sample_ratio"], config["sample_method"])
+        all_data = sample_load_dataset(config["sample_ratio"], config["sample_method"], config)
         all_data["SUBMISSION_TEXT"], all_data["SUBMISSION_URL"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
         categorical_features, string_features, target = get_selected_feature(config)
 

@@ -7,7 +7,7 @@ from utils import get_config, load_model, save_model, to_device, parse_config
 import pandas as pd
 import numpy as np
 from collections import Counter
-config = get_config("configs/small_sample_sub_minority.yml", "_test", print_config=False)
+config = get_config("configs/subreddit_minority_no_peer.yml", "_test", print_config=False)
 target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, train_submission_upvote_df, num_all_users = get_model_input(config)
 model = TransformerVoter(config, categorical_features, string_features, original_feature_map)
 extra_input = (categorical_features, string_features, target)

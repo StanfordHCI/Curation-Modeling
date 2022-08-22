@@ -188,7 +188,9 @@ def record_existing_votes(train_data:pd.DataFrame):
     existing_user_updown_votes = defaultdict(Counter)
     existing_user_votes = Counter()
     existing_submission_votes = defaultdict(Counter)
+    existing_user_subreddits = defaultdict(set)
     usernames = train_data["USERNAME"].to_list()
+    subreddits = train_data["SUBREDDIT"].to_list()
     sub_ids = train_data["SUBMISSION_ID"].to_list()
     votes = train_data["VOTE"].to_list()
     for row_i in range(len(train_data)):
@@ -196,4 +198,5 @@ def record_existing_votes(train_data:pd.DataFrame):
         existing_user_updown_votes[usernames[row_i]][votes[row_i]] += 1
         existing_user_votes[usernames[row_i]] += 1
         existing_submission_votes[sub_ids[row_i]][votes[row_i]] += 1
-    return existing_votes, existing_user_votes, existing_user_updown_votes, existing_submission_votes
+        existing_user_subreddits[usernames[row_i]].add(subreddits[row_i])
+    return existing_votes, existing_user_votes, existing_user_updown_votes, existing_submission_votes, existing_user_subreddits

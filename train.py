@@ -132,6 +132,10 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
                 total_loss_epoch += total_loss.item()
                 total_loss.backward()
                 optim.step()
+                if not step_generator:
+                    step_loss = float(total_loss)/config['batch_size']
+                    train_loader_tqdm.set_description(f"Training: total_loss = {step_loss:.4f}")
+                    wandb.log({"step_loss": step_loss})
 
             if verbose > 0 and not step_generator:
                 for name, metric_func in model.metrics.items():
@@ -242,6 +246,7 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
                 train_same_vote_rate_acc_df.at[train_same_vote_rate, "Confidence"] += abs(pred_score - 0.5)
                 train_same_vote_rate_acc_df.at[train_same_vote_rate, "Total"] += 1
         
+        debug("How well can the model deal with cold start problem?")
         train_submission_votes_num_acc_df = train_submission_votes_num_acc_df[train_submission_votes_num_acc_df["Total"] > 0]
         train_submission_votes_num_acc_df["Acc rate"] = train_submission_votes_num_acc_df["Acc"]/train_submission_votes_num_acc_df["Total"]
         train_submission_votes_num_acc_df["Avg confidence"] = train_submission_votes_num_acc_df["Confidence"]/train_submission_votes_num_acc_df["Total"]
@@ -250,14 +255,16 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
         sns.lineplot(data=train_submission_votes_num_acc_df[["Acc rate", "Avg confidence", "Total scaled"]], legend = "auto").set(title='Accuracy & confidence given different #votes on this post')
         plt.show()
 
+        debug("How well can the model predict the lurkers' opinions?")
         train_user_votes_num_acc_df = train_user_votes_num_acc_df[train_user_votes_num_acc_df["Total"] > 0]
         train_user_votes_num_acc_df["Acc rate"] = train_user_votes_num_acc_df["Acc"]/train_user_votes_num_acc_df["Total"]
         train_user_votes_num_acc_df["Avg confidence"] = train_user_votes_num_acc_df["Confidence"]/train_user_votes_num_acc_df["Total"]
         train_user_votes_num_acc_df["Total scaled"] = train_user_votes_num_acc_df["Total"]/len(pred_ans)
         sns.set_theme()
-        sns.lineplot(data=train_user_votes_num_acc_df[["Acc rate", "Avg confidence", "Total scaled"]], legend = "auto").set(title='Accuracy & confidence given different #votes from this user')
+        sns.lineplot(data=train_user_votes_num_acc_df.loc[:500, ["Acc rate", "Avg confidence", "Total scaled"]], legend = "auto").set(title='Accuracy & confidence given different #votes from this user')
         plt.show()
         
+        debug("How well can the model predict the minority opinions?")
         train_same_vote_rate_acc_df = train_same_vote_rate_acc_df[train_same_vote_rate_acc_df["Total"] > 0]
         train_same_vote_rate_acc_df["Acc rate"] = train_same_vote_rate_acc_df["Acc"]/train_same_vote_rate_acc_df["Total"]
         train_same_vote_rate_acc_df["Avg confidence"] = train_same_vote_rate_acc_df["Confidence"]/train_same_vote_rate_acc_df["Total"]
