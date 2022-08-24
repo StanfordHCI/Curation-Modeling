@@ -36,7 +36,7 @@ selected_subreddit: null # Select a Subreddit, e.g., "r/politics", or select mul
 upvote_ratio_thres: 0.5
 upvote_confidence_thres: 0
 submission_source: "test_data" # "test_data" or "custom"
-user_grouping_method: "votes" # or "neural", "all_user_as_group", "random_user_as_group", "single_user_as_group", "manual", "interest_r/Conservative_r/Liberal_r/Republican_r/democrats_r/VoteBlue", "predict_all_submissions", "none", "votes", or their combination (separate them with space). "vote" for using voting matrix and PCA for clustering; "none" for no curation
+user_grouping_method: "votes" # or "neural", "all_user_as_group", "random_user_as_group", "single_user_as_group", "manual", "interest_r/Conservative_r/Liberal_r/Republican_r/democrats_r/VoteBlue", "predict_all_submissions", "none", "votes", or their combination (separate them with space). "vote" for using voting matrix and PCA for clustering; "none" for no curation (broadcast)
 manual_user_groups: null
 analyze_post: True # whether to do sentiment analysis, classification and entities analysis
 max_test_submissions_per_subreddit: 500

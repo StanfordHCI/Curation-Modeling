@@ -201,8 +201,8 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
             data_info, train_submission_upvote_df = get_test_data_info(train_data, test_data)
         test_filter = {"": (data["VOTE"] >=-1).to_numpy(), "_train_user_votes_num>=3": (data_info["train_user_votes_num"] >= 3).to_numpy(), "_train_submission_votes_num>=3": (data_info["train_submission_votes_num"] >= 3).to_numpy(), "_train_user_votes_num<=3": (data_info["train_user_votes_num"] <= 3).to_numpy(), "_train_submission_votes_num<=3": (data_info["train_submission_votes_num"] <= 3).to_numpy()} 
 
-    # calculate all evaluation results
-    ground_truth = (data["VOTE"].to_numpy() > 0.5).astype(float)
+    # calculate evaluation results of different metrics
+    ground_truth = (data["VOTE"].to_numpy() > 0.5).astype(float) # transform weak downvote to downvote
     eval_result = OrderedDict()
     for wei in [None, weights]:
         for filter_name in test_filter:
@@ -214,7 +214,14 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
                     for vote in [0, 1]:
                         if 0 not in ground_truth[(data["VOTE"] == vote).to_numpy() * filter].shape:
                             eval_result[f"{name}_vote_{vote}{filter_name}{'_with_weight' if wei is not None else ''}"] = apply_metric(metric_func, ground_truth[(data["VOTE"] == vote).to_numpy() * filter], pred_ans[(data["VOTE"] == vote).to_numpy() * filter], sample_weight=wei[(data["VOTE"] == vote).to_numpy() * filter] if wei is not None else None)
-
+    # calculate the accuracy for different communities
+    all_subreddits = data["SUBREDDIT"].to_list()
+    all_acc_strs = list(tuple(np.where(pred_ans > 0.5, 1, 0) == ground_truth))
+    subreddit_acc_counter = Counter([f"{sub}_{acc}" for sub, acc in zip(all_subreddits, all_acc_strs)])
+    subreddit_acc = {subreddit: subreddit_acc_counter[subreddit+"_True"] / (subreddit_acc_counter[subreddit+"_True"] + subreddit_acc_counter[subreddit+"_False"]) for subreddit in set(data["SUBREDDIT"].to_list()) if (subreddit_acc_counter[subreddit+"_True"] + subreddit_acc_counter[subreddit+"_False"]) > 0}
+    eval_result["subreddit_acc"] = subreddit_acc
+    
+    
     # draw #votes for a user, #votes for a submission <-> acc, confidence curve
     if (not simple) and (data_info is not None):
         train_user_votes_nums = data_info["train_user_votes_num"].to_numpy()
