@@ -76,8 +76,6 @@ if 'cached_predictions' not in st.session_state:
         
         
     
-    # user_grouping_method = "interest_r/Feminism_r/MensRights" #TODO: change this
-    # user_grouping_method = "interest_r/Conservative_r/Liberal_r/Republican_r/democrats_r/VoteBlue" #TODO: change this
     manual_user_groups = config["manual_user_groups"]
     # manual_user_groups = {"Conservative": {66, 39, 10, 44, 16, 60}, "Democratic":{0, 65, 64, 37, 49, 52, 20, 22, 23, 26, 29}}
     debug(user_grouping_method=user_grouping_method)
@@ -107,6 +105,9 @@ if 'cached_predictions' not in st.session_state:
 
 
     submissions_before_curation:dict = subreddit_test_submissions[selected_subreddit]
+    # # TODO: only select a small set of submissions
+    # one_key = list(submissions_before_curation.keys())[0]
+    # submissions_before_curation = {one_key: submissions_before_curation[one_key]}
     
     
     pred_group_votes_info = {}
@@ -116,9 +117,9 @@ if 'cached_predictions' not in st.session_state:
     groups_preferred_submissions, groups_preferred_submissions_text, groups_submission_upvote_count_matrix = predict_groups_preferences(config, model, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers=group_centers, user_grouping_method=user_grouping_method, existing_votes=existing_votes, existing_user_updown_votes=existing_user_updown_votes, pred_group_votes_info = pred_group_votes_info, upvote_ratio_thres = 0.5, upvote_confidence_thres=0.0, selected_subreddit_active_user_i_user_map=selected_subreddit_active_user_i_user_map, extra_input=extra_input)
     
     
-    st.session_state['cached_predictions'] = (config, model, test_data, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers, user_grouping_method, existing_votes, existing_user_updown_votes, selected_subreddit_active_user_i_user_map, extra_input, submission_sentiment_map, submission_class_map, submission_entity_map, reliability_bias_df, media_url_re, pred_group_votes_info)
+    st.session_state['cached_predictions'] = (config, model, test_data, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers, user_grouping_method, existing_votes, existing_user_updown_votes, selected_subreddit_active_user_i_user_map, extra_input, submission_sentiment_map, submission_class_map, submission_entity_map, reliability_bias_df, media_url_re, pred_group_votes_info, original_feature_map, all_submissions)
 else:
-    config, model, test_data, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers, user_grouping_method, existing_votes, existing_user_updown_votes, selected_subreddit_active_user_i_user_map, extra_input, submission_sentiment_map, submission_class_map, submission_entity_map, reliability_bias_df, media_url_re, pred_group_votes_info = st.session_state['cached_predictions']
+    config, model, test_data, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers, user_grouping_method, existing_votes, existing_user_updown_votes, selected_subreddit_active_user_i_user_map, extra_input, submission_sentiment_map, submission_class_map, submission_entity_map, reliability_bias_df, media_url_re, pred_group_votes_info, original_feature_map, all_submissions = st.session_state['cached_predictions']
 
 batch_size = 1024
 upvote_ratio_thres = st.sidebar.slider("Set the threshold for curator upvote rate", 0.0, 1.0,  config["upvote_ratio_thres"], step = 0.01) 
@@ -128,34 +129,51 @@ config["upvote_confidence_thres"] = float(config["upvote_confidence_thres"])
 upvote_confidence_thres = st.sidebar.slider("Set the threshold for upvote confidence", 0.0, 0.5, config["upvote_confidence_thres"], step = 0.01)
 
 
+group_names = list(users_in_groups.keys())
+if "manual" not in group_names:
+    group_names.append("manual")
+group_x = st.selectbox("Select a group of curators from our recommendations", group_names)
+if group_x == "manual":
+    available_usernames = original_feature_map["USERNAME"].values()
+    inverse_username_map = {v:k for k,v in original_feature_map["USERNAME"].items()}
+    chosen_users = st.multiselect("Manually select curators", available_usernames)
+    users_in_groups["manual"] = {inverse_username_map[x] for x in chosen_users}
 
-groups_preferred_submissions, groups_preferred_submissions_text, groups_submission_upvote_count_matrix = predict_groups_preferences(config, model, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers=group_centers, user_grouping_method=user_grouping_method, existing_votes=existing_votes, existing_user_updown_votes=existing_user_updown_votes, pred_group_votes_info = pred_group_votes_info, upvote_ratio_thres = upvote_ratio_thres, upvote_confidence_thres=upvote_confidence_thres, selected_subreddit_active_user_i_user_map=selected_subreddit_active_user_i_user_map, extra_input=extra_input)
-
-
-
-
-max_show_posts = 30
-all_preferred_submissions_text = set.intersection(*[set(groups_preferred_submissions_text[group_x]) for group_x in groups_preferred_submissions_text])
-# groups_preferred_submissions_text
-group_names = list(groups_preferred_submissions_text.keys())
-
-group_x = st.selectbox("Select a group of curators", group_names)
-top_preferred_submission_text = groups_preferred_submissions_text[group_x][:max_show_posts]
-top_distinct_preferred_submission_text = [_ for _ in groups_preferred_submissions_text[group_x] if _ in set(groups_preferred_submissions_text[group_x]) - all_preferred_submissions_text][:max_show_posts]
-show_text = top_distinct_preferred_submission_text  # TODO:
-st.write(f"Group {group_x} preferred submissions:")
-for submission_text in show_text:
-    st.warning(submission_text)
-
-print(f"Users in group {group_x} prefers {show_text}") # 
+if st.button("Get curate posts!"):
+    groups_preferred_submissions, groups_preferred_submissions_text, groups_submission_upvote_count_matrix = predict_groups_preferences(config, model, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers=group_centers, user_grouping_method=user_grouping_method, existing_votes=existing_votes, existing_user_updown_votes=existing_user_updown_votes, pred_group_votes_info = pred_group_votes_info, upvote_ratio_thres = upvote_ratio_thres, upvote_confidence_thres=upvote_confidence_thres, selected_subreddit_active_user_i_user_map=selected_subreddit_active_user_i_user_map, extra_input=extra_input)
 
 
 
-st.write("Pearson ranking items:", groups_submission_upvote_count_matrix.index.to_list())
-groups_submission_upvote_count_matrix_nonzero = groups_submission_upvote_count_matrix[groups_submission_upvote_count_matrix.sum(axis = 1) != 0]
-group_preference_pearson_corr = np.corrcoef(groups_submission_upvote_count_matrix_nonzero) # (697, 697)
-st.write(group_preference_pearson_corr)
+    max_show_posts = 30
+    all_preferred_submissions_text = set.intersection(*[set(groups_preferred_submissions_text[group_x]) for group_x in groups_preferred_submissions_text])
+    # groups_preferred_submissions_text
+
+
+        
+
+    top_preferred_submission_text = groups_preferred_submissions_text[group_x][:max_show_posts]
+    top_preferred_submission_ids = groups_preferred_submissions[group_x][:max_show_posts]
+    top_distinct_preferred_submission_text = [_ for i, _ in enumerate(groups_preferred_submissions_text[group_x]) if _ in set(groups_preferred_submissions_text[group_x]) - all_preferred_submissions_text][:max_show_posts]
+    top_distinct_preferred_submission_ids = [groups_preferred_submissions[group_x][i] for i, _ in enumerate(groups_preferred_submissions_text[group_x]) if _ in set(groups_preferred_submissions_text[group_x]) - all_preferred_submissions_text][:max_show_posts]
+    # TODO:
+    show_text = top_preferred_submission_text  
+    show_ids = top_preferred_submission_ids
+    for i, submission_text in enumerate(show_text):
+        user_bar, text_bar = st.columns([1, 5])
+        id = show_ids[i]
+        user_bar.write(f'#### {all_submissions[id]["USERNAME"] if "USERNAME" not in original_feature_map else original_feature_map["USERNAME"][all_submissions[id]["USERNAME"]]}')
+        user_bar.write(all_submissions[id]["CREATED_TIME"])
+        text_bar.warning(submission_text)
+
+    print(f"Users in group {group_x} prefers {show_text}") # 
 
 
 
-visualize_group_preferences(groups_preferred_submissions, test_data, user_grouping_method, submission_sentiment_map = submission_sentiment_map, submission_class_map=submission_class_map, submission_entity_map=submission_entity_map, reliability_bias_df=reliability_bias_df, media_url_re=media_url_re)
+    st.write("Pearson ranking items:", groups_submission_upvote_count_matrix.index.to_list())
+    groups_submission_upvote_count_matrix_nonzero = groups_submission_upvote_count_matrix[groups_submission_upvote_count_matrix.sum(axis = 1) != 0]
+    group_preference_pearson_corr = np.corrcoef(groups_submission_upvote_count_matrix_nonzero) # (697, 697)
+    st.write(group_preference_pearson_corr)
+
+
+
+    visualize_group_preferences(groups_preferred_submissions, test_data, user_grouping_method, submission_sentiment_map = submission_sentiment_map, submission_class_map=submission_class_map, submission_entity_map=submission_entity_map, reliability_bias_df=reliability_bias_df, media_url_re=media_url_re)
