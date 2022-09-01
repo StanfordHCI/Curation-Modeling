@@ -6,7 +6,7 @@ language_model_encoder_name: prajjwal1/bert-mini
 sample_ratio: 0.05
 train_at_least_n_votes: 0
 l2_normalization: 0.0001
-prepared_data_path: data/reddit/subreddit_minority_no_peer.pt
+prepared_data_path: data/reddit/subreddit_minority_no_peer_new.pt
 train_test_different_submissions: False
 learning_rate: 0.00003
 # load_pretrained_model: True

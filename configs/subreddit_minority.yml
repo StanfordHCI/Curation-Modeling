@@ -1,5 +1,5 @@
 sample_method: ["selected_subreddits"]
-selected_subreddits: ["r/politics", "r/Conservative", "r/Liberal", "r/Republican", "r/democrats", "r/VoteBlue", "r/jokes", "r/science", "r/ScienceFacts", "r/technology", "r/shittyaskscience", "r/Feminism", "r/MensRights", "r/lesbian", "r/LesbianActually", "r/gay", "r/trans", "r/teenagers", "r/Showerthoughts"]
+selected_subreddits: ["r/politics", "r/Conservative", "r/Liberal", "r/Republican", "r/democrats", "r/VoteBlue", "r/Jokes", "r/science", "r/ScienceFacts", "r/technology", "r/shittyaskscience", "r/Feminism", "r/MensRights", "r/lesbian", "r/LesbianActually", "r/gay", "r/trans", "r/teenagers", "r/Showerthoughts"]
 model_type: Transformer
 encoder_hidden_dim: 256
 language_model_encoder_name: prajjwal1/bert-mini

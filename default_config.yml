@@ -34,7 +34,7 @@ submission_text_dict_path: data/reddit/submission_text_dict.pt
 ### curation modeling
 selected_subreddit: null # Select a Subreddit, e.g., "r/politics", or select multiple subreddits, e.g., "r/politics_r/Conservative_r/Liberal_r/Republican_r/democrats_r/VoteBlue". null: select later. 
 upvote_ratio_thres: 0.5
-upvote_confidence_thres: 0
+upvote_confidence_thres: 0.5
 submission_source: "test_data" # "test_data" or "custom"
 user_grouping_method: "votes" # or "neural", "all_user_as_group", "random_user_as_group", "single_user_as_group", "manual", "interest_r/Conservative_r/Liberal_r/Republican_r/democrats_r/VoteBlue", "predict_all_submissions", "none", "votes", or their combination (separate them with space). "vote" for using voting matrix and PCA for clustering; "none" for no curation (broadcast)
 manual_user_groups: null
