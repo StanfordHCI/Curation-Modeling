@@ -94,8 +94,7 @@ if 'cached_predictions' not in st.session_state:
     debug(selected_subreddit_active_users_reps=selected_subreddit_active_users_reps) # NOTE: selected_subreddit_active_users_reps is not None only if user_grouping_method == "neural" or "votes"
 
 
-    if "interest" in user_grouping_method or "political_affiliation" in user_grouping_method:
-        reliability_bias_df, media_url_re = get_url_reliability_bias()
+    reliability_bias_df, media_url_re = get_url_reliability_bias()
 
 
 
@@ -114,7 +113,7 @@ if 'cached_predictions' not in st.session_state:
     
     
     model = model.to(model.device); model.eval()
-    groups_preferred_submissions, groups_preferred_submissions_text, groups_submission_upvote_count_matrix = predict_groups_preferences(config, model, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers=group_centers, user_grouping_method=user_grouping_method, existing_votes=existing_votes, existing_user_updown_votes=existing_user_updown_votes, pred_group_votes_info = pred_group_votes_info, upvote_ratio_thres = 0.5, upvote_confidence_thres=0.0, selected_subreddit_active_user_i_user_map=selected_subreddit_active_user_i_user_map, extra_input=extra_input)
+    groups_preferred_submissions, groups_preferred_submissions_text, groups_submission_upvote_count_matrix = predict_groups_preferences(config, model, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers=group_centers, user_grouping_method=user_grouping_method, existing_votes=existing_votes, existing_user_updown_votes=existing_user_updown_votes, pred_group_votes_info = pred_group_votes_info, upvote_ratio_thres = 0.5, upvote_confidence_thres=0.0, selected_subreddit_active_user_i_user_map=selected_subreddit_active_user_i_user_map, extra_input=extra_input, display = False)
     
     
     st.session_state['cached_predictions'] = (config, model, test_data, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers, user_grouping_method, existing_votes, existing_user_updown_votes, selected_subreddit_active_user_i_user_map, extra_input, submission_sentiment_map, submission_class_map, submission_entity_map, reliability_bias_df, media_url_re, pred_group_votes_info, original_feature_map, all_submissions)
@@ -126,7 +125,7 @@ upvote_ratio_thres = st.sidebar.slider("Set the threshold for curator upvote rat
 if type(config["upvote_confidence_thres"]) == list:
     config["upvote_confidence_thres"] = config["upvote_confidence_thres"][0]
 config["upvote_confidence_thres"] = float(config["upvote_confidence_thres"])
-upvote_confidence_thres = st.sidebar.slider("Set the threshold for upvote confidence", 0.0, 0.5, config["upvote_confidence_thres"], step = 0.01)
+upvote_confidence_thres = st.sidebar.slider("Set the threshold for upvote confidence", 0.0, 1.0, config["upvote_confidence_thres"], step = 0.01)
 
 
 group_names = list(users_in_groups.keys())
@@ -159,9 +158,9 @@ if st.button("Get curate posts!"):
     show_text = top_preferred_submission_text  
     show_ids = top_preferred_submission_ids
     for i, submission_text in enumerate(show_text):
-        user_bar, text_bar = st.columns([1, 5])
+        user_bar, text_bar = st.columns([3, 10])
         id = show_ids[i]
-        user_bar.write(f'#### {all_submissions[id]["USERNAME"] if "USERNAME" not in original_feature_map else original_feature_map["USERNAME"][all_submissions[id]["USERNAME"]]}')
+        user_bar.write(f'##### {all_submissions[id]["USERNAME"] if "USERNAME" not in original_feature_map else original_feature_map["USERNAME"][all_submissions[id]["USERNAME"]]}')
         user_bar.write(all_submissions[id]["CREATED_TIME"])
         text_bar.warning(submission_text)
 
