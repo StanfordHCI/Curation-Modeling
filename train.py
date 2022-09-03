@@ -261,8 +261,8 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
         train_submission_votes_num_acc_df["Total scaled"] = train_submission_votes_num_acc_df["Total"]/len(pred_ans)
         sns.set_theme(style="whitegrid")
         debug('Accuracy & confidence given different #votes on this post')
-        ax = sns.lineplot(data=train_submission_votes_num_acc_df[["Accuracy"]]) # , "Avg confidence", "Total scaled"  , legend = "auto"
-        ax.legend(loc='lower right')
+        ax = sns.lineplot(data=train_submission_votes_num_acc_df[["Accuracy"]], legend = False) # , "Avg confidence", "Total scaled"  , legend = "auto"
+        plt.ylabel("Accuracy")
         plt.xlabel("Number of votes a post has received in the training set")
         ax.set_ylim([0, 1])
         plt.show()
@@ -274,8 +274,8 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
         train_user_votes_num_acc_df["Total scaled"] = train_user_votes_num_acc_df["Total"]/len(pred_ans)
         sns.set_theme(style="whitegrid")
         debug('Accuracy & confidence given different #votes from this user')
-        ax = sns.lineplot(data=train_user_votes_num_acc_df.loc[:500, ["Accuracy"]]) # , "Avg confidence", "Total scaled"  , legend = "auto"
-        ax.legend(loc='lower right')
+        ax = sns.lineplot(data=train_user_votes_num_acc_df.loc[:500, ["Accuracy"]], legend = False) # , "Avg confidence", "Total scaled"  , legend = "auto"
+        plt.ylabel("Accuracy")
         plt.xlabel("Number of times a user has voted in the training set")
         ax.set_ylim([0, 1])
         plt.show()
@@ -287,8 +287,8 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
         train_same_vote_rate_acc_df["Total scaled"] = train_same_vote_rate_acc_df["Total"]/len(pred_ans)
         sns.set_theme(style="whitegrid")
         debug('Accuracy & confidence given different %votes that is same as the target vote')
-        ax = sns.lineplot(data=train_same_vote_rate_acc_df[["Accuracy"]]) # , "Avg confidence", "Total scaled"  , legend = "auto"
-        ax.legend(loc='lower right')
+        ax = sns.lineplot(data=train_same_vote_rate_acc_df[["Accuracy"]], legend = False) # , "Avg confidence", "Total scaled"  , legend = "auto"
+        plt.ylabel("Accuracy")
         plt.xlabel("Percentage of votes that is same as the target vote")
         ax.set_ylim([0, 1])
         plt.show()
