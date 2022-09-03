@@ -9,6 +9,8 @@ from superdebug import debug
 import wandb as wab
 import pandas as pd
 import sklearn.decomposition
+from tqdm import tqdm
+from scipy import sparse
 use_debug = True
 
 def merge_dict(main_dict, new_dict):
@@ -152,11 +154,13 @@ def get_user_reps(selected_users, all_user_embedding, train_data:pd.DataFrame = 
     selected_users_bool_vec = get_bool_vec(selected_users, all_user_embedding.shape[0])
     # user_user_i_map = {}
     selected_user_i_user_map = {}
+    selected_user_user_i_map = {}
     user_i = 0
-    for user, in_subreddit in enumerate(selected_users_bool_vec):
-        if in_subreddit:
+    for user, is_selected in enumerate(selected_users_bool_vec):
+        if is_selected:
             # user_user_i_map[user] = user_i
             selected_user_i_user_map[user_i] = user
+            selected_user_user_i_map[user] = user_i
             user_i += 1
     # assert len(user_user_i_map) == len(user_i_user_map)
     selected_users_reps = None
@@ -165,18 +169,29 @@ def get_user_reps(selected_users, all_user_embedding, train_data:pd.DataFrame = 
     elif "votes" in user_grouping_method:
         assert train_data is not None and selected_submissions is not None
         sub_sub_i_map = {sub: sub_i for sub_i, sub in enumerate(list(selected_submissions.keys()))}
-        users_reps = torch.zeros([all_user_embedding.shape[0], len(selected_submissions)])
-        for row_i, row in train_data.iterrows():
-            if row["USERNAME"] in selected_users and row["SUBMISSION_ID"] in selected_submissions:
-                vote = 1 if row["VOTE"] == 1 else -1
-                users_reps[row["USERNAME"], sub_sub_i_map[row["SUBMISSION_ID"]]] = vote
-        selected_users_reps = users_reps[selected_users_bool_vec, :]
-        users_vote_sum = (selected_users_reps * selected_users_reps).sum(axis = -1, keepdim= True)
-        assert (users_vote_sum != 0).any()
+        # selected_users_reps = torch.zeros([len(selected_user_user_i_map), len(selected_submissions)])
+        train_users = train_data["USERNAME"].to_list()
+        train_submission_ids = train_data["SUBMISSION_ID"].to_list()
+        train_votes = train_data["VOTE"].to_list()
+        i_list, j_list, vote_list = [], [], []
+        for submission_id, username, vote in tqdm(zip(train_submission_ids, train_users, train_votes)):
+            if username in selected_user_user_i_map and submission_id in sub_sub_i_map:
+                vote = 1 if vote == 1 else -1
+                i_list.append(selected_user_user_i_map[username])
+                j_list.append(sub_sub_i_map[submission_id])
+                vote_list.append(vote)
+                # selected_users_reps[selected_user_user_i_map[username], sub_sub_i_map[submission_id]] = vote
+        selected_users_reps = sparse.coo_matrix((vote_list, (i_list, j_list)), shape = [len(selected_user_user_i_map), len(selected_submissions)])
+        # users_vote_sum = (selected_users_reps * selected_users_reps).sum(axis = -1, keepdim= True)
+        # assert (users_vote_sum != 0).any()
         # selected_users_reps = selected_users_reps / users_vote_sum # average votes on each submission
         if do_PCA:
+            selected_users_reps = selected_users_reps.todense()
             debug(selected_users_reps_before_PCA=selected_users_reps.shape)
-            pca_solver = sklearn.decomposition.PCA(n_components=0.95)
+            if selected_users_reps.shape[1] > 10000:
+                pca_solver = sklearn.decomposition.PCA(n_components=1000)
+            else:
+                pca_solver = sklearn.decomposition.PCA(n_components=0.95)
             selected_users_reps = pca_solver.fit_transform(selected_users_reps)
             debug(selected_users_reps_after_PCA = selected_users_reps.shape)
 
