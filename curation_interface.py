@@ -35,10 +35,10 @@ class Analysis(Base):
 CONFIG_PATH = "configs/subreddit_minority_no_peer.yml"
 config = get_config(CONFIG_PATH, "_curation", print_config = False)
 selected_subreddit = config["selected_subreddit"]
-selected_subreddit = "r/politics_r/Conservative_r/Liberal_r/Republican_r/democrats_r/VoteBlue"
+selected_subreddit = "r/politics"
 user_grouping_method = config["user_grouping_method"] # 
-user_grouping_method = "interest_r/Conservative_r/Liberal_r/Republican_r/democrats_r/VoteBlue random_user_as_group"
-
+user_grouping_method = "interest_r/Conservative_r/Liberal random_user_as_group"
+st.title(f"Community: {selected_subreddit}")
 
 if 'cached_predictions' not in st.session_state:
     
@@ -67,10 +67,11 @@ if 'cached_predictions' not in st.session_state:
     selected_subreddit_active_users, subreddit_active_users, subreddit_votes_counter, subreddit_train_submissions, subreddit_test_submissions = get_selected_subreddit_info(config, selected_subreddit, subreddit_active_users, subreddit_votes_counter, subreddit_train_submissions, subreddit_test_submissions, original_feature_map, active_user_votes_thres)
 
     analyze_post = False
-
+    submission_text_map = test_data[["SUBMISSION_ID", "SUBMISSION_TEXT"]].set_index("SUBMISSION_ID").to_dict()["SUBMISSION_TEXT"]
+    
     if analyze_post and config["submission_source"] == "test_data":
         subreddit_submissions_ids = list(subreddit_test_submissions[selected_subreddit].keys())
-        subreddit_submissions_ids, subreddit_submissions_text = get_submissions_text(subreddit_submissions_ids, subreddit_test_submissions, selected_subreddit, pass_analyzed = True, submission_sentiment_map = submission_sentiment_map, submission_class_map = submission_class_map, submission_entity_map = submission_entity_map)
+        subreddit_submissions_ids, subreddit_submissions_text = get_submissions_text(subreddit_submissions_ids, submission_text_map, pass_analyzed = True, submission_sentiment_map = submission_sentiment_map, submission_class_map = submission_class_map, submission_entity_map = submission_entity_map)
         # subreddit_submissions_ids, subreddit_submissions_text
         post_analysis_batch({id: text for id, text in zip(subreddit_submissions_ids, subreddit_submissions_text)}, session, Analysis, submission_sentiment_map, submission_class_map, submission_entity_map, language_v1, client, google)
         
@@ -113,12 +114,18 @@ if 'cached_predictions' not in st.session_state:
     
     
     model = model.to(model.device); model.eval()
-    groups_preferred_submissions, groups_preferred_submissions_text, groups_submission_upvote_count_matrix = predict_groups_preferences(config, model, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers=group_centers, user_grouping_method=user_grouping_method, existing_votes=existing_votes, existing_user_updown_votes=existing_user_updown_votes, pred_group_votes_info = pred_group_votes_info, upvote_ratio_thres = 0.5, upvote_confidence_thres=0.0, selected_subreddit_active_user_i_user_map=selected_subreddit_active_user_i_user_map, extra_input=extra_input, display = False)
+    groups_preferred_submissions, groups_preferred_submissions_text, groups_submission_upvote_count_matrix, groups_curator_upvote_rate_content = predict_groups_preferences(config, model, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers=group_centers, user_grouping_method=user_grouping_method, existing_votes=existing_votes, existing_user_updown_votes=existing_user_updown_votes, pred_group_votes_info = pred_group_votes_info, upvote_ratio_thres = 0.5, upvote_confidence_thres=0.0, selected_subreddit_active_user_i_user_map=selected_subreddit_active_user_i_user_map, extra_input=extra_input, display = False)
     
     
-    st.session_state['cached_predictions'] = (config, model, test_data, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers, user_grouping_method, existing_votes, existing_user_updown_votes, selected_subreddit_active_user_i_user_map, extra_input, submission_sentiment_map, submission_class_map, submission_entity_map, reliability_bias_df, media_url_re, pred_group_votes_info, original_feature_map, all_submissions)
+    subreddit_users = list(set(train_data[train_data["SUBREDDIT"] == selected_subreddit]["USERNAME"]))
+    available_usernames = [original_feature_map["USERNAME"][username] for username in subreddit_users]
+    inverse_username_map = {original_feature_map["USERNAME"][username]:username for username in subreddit_users} 
+    
+    st.session_state['cached_predictions'] = (config, model, train_data, test_data, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers, user_grouping_method, existing_votes, existing_user_updown_votes, selected_subreddit_active_user_i_user_map, extra_input, submission_sentiment_map, submission_class_map, submission_entity_map, reliability_bias_df, media_url_re, pred_group_votes_info, original_feature_map, all_submissions, subreddit_users, available_usernames, inverse_username_map, existing_user_subreddits)
+    debug("Stored to cache")
 else:
-    config, model, test_data, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers, user_grouping_method, existing_votes, existing_user_updown_votes, selected_subreddit_active_user_i_user_map, extra_input, submission_sentiment_map, submission_class_map, submission_entity_map, reliability_bias_df, media_url_re, pred_group_votes_info, original_feature_map, all_submissions = st.session_state['cached_predictions']
+    debug("Using cache")
+    config, model, train_data, test_data, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers, user_grouping_method, existing_votes, existing_user_updown_votes, selected_subreddit_active_user_i_user_map, extra_input, submission_sentiment_map, submission_class_map, submission_entity_map, reliability_bias_df, media_url_re, pred_group_votes_info, original_feature_map, all_submissions, subreddit_users, available_usernames, inverse_username_map, existing_user_subreddits = st.session_state['cached_predictions']
 
 batch_size = 1024
 upvote_ratio_thres = st.sidebar.slider("Set the threshold for curator upvote rate", 0.0, 1.0,  config["upvote_ratio_thres"], step = 0.01) 
@@ -133,12 +140,23 @@ if "manual" not in group_names:
     group_names.append("manual")
 group_x = st.selectbox("Select a group of curators from our recommendations", group_names)
 if group_x == "manual":
-    available_usernames = original_feature_map["USERNAME"].values()
-    inverse_username_map = {v:k for k,v in original_feature_map["USERNAME"].items()}
     chosen_users = st.multiselect("Manually select curators", available_usernames)
     users_in_groups["manual"] = {inverse_username_map[x] for x in chosen_users}
 
-if st.button("Get curate posts!"):
+left_col, right_col = st.columns(2)
+explore_curators = left_col.button("View user information")
+do_curate = right_col.button("Get curated posts")
+if explore_curators:
+    user_info_list = []
+    for username in users_in_groups["manual"]:
+        user_info, user_info_str = get_more_user_info(username, original_feature_map, existing_user_subreddits, train_data, selected_subreddit)
+        user_info_list.append(user_info)
+    user_info_df = pd.DataFrame.from_records(user_info_list).set_index("username")
+    user_info_df["joined subreddits"] = user_info_df["joined subreddits"].map(lambda x: str(x))
+    user_info_df["upvoted posts"] = user_info_df["upvoted posts"].map(lambda x: json.dumps(x))
+    user_info_df["downvoted posts"] = user_info_df["downvoted posts"].map(lambda x: json.dumps(x))
+    st.write(user_info_df)
+if do_curate:
     groups_preferred_submissions, groups_preferred_submissions_text, groups_submission_upvote_count_matrix = predict_groups_preferences(config, model, users_in_groups, submissions_before_curation, subreddit_test_submissions, selected_subreddit, group_centers=group_centers, user_grouping_method=user_grouping_method, existing_votes=existing_votes, existing_user_updown_votes=existing_user_updown_votes, pred_group_votes_info = pred_group_votes_info, upvote_ratio_thres = upvote_ratio_thres, upvote_confidence_thres=upvote_confidence_thres, selected_subreddit_active_user_i_user_map=selected_subreddit_active_user_i_user_map, extra_input=extra_input)
 
 
