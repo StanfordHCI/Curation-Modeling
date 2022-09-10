@@ -222,6 +222,18 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
     subreddit_acc = {subreddit: subreddit_acc_counter[subreddit+"_True"] / (subreddit_acc_counter[subreddit+"_True"] + subreddit_acc_counter[subreddit+"_False"]) for subreddit in set(data["SUBREDDIT"].to_list()) if (subreddit_acc_counter[subreddit+"_True"] + subreddit_acc_counter[subreddit+"_False"]) > 0}
     eval_result["subreddit_acc"] = subreddit_acc
     
+    # ROC curve
+    # from sklearn.metrics import RocCurveDisplay
+    # RocCurveDisplay.from_predictions(ground_truth, pred_ans)
+    # plt.show()
+    
+    from sklearn.metrics import roc_curve
+    fpr, tpr, _ = roc_curve(ground_truth, pred_ans)
+    plt.plot(fpr, tpr, linestyle='--', label='Vote prediction')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.legend()
+    plt.show()
     
     # draw #votes for a user, #votes for a submission <-> acc, confidence curve
     if (not simple) and (data_info is not None):
@@ -242,16 +254,16 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
             train_same_vote_rate = train_same_vote_rates[vote_i]
 
             train_submission_votes_num_acc_df.at[train_submission_votes_num, "Acc"] += int(pred_vote == gt_vote)
-            train_submission_votes_num_acc_df.at[train_submission_votes_num, "Confidence"] += abs(pred_score - 0.5)
+            train_submission_votes_num_acc_df.at[train_submission_votes_num, "Confidence"] += abs(1-gt_vote - pred_score)
             train_submission_votes_num_acc_df.at[train_submission_votes_num, "Total"] += 1
 
             train_user_votes_num_acc_df.at[train_user_votes_num, "Acc"] += int(pred_vote == gt_vote)
-            train_user_votes_num_acc_df.at[train_user_votes_num, "Confidence"] += abs(pred_score - 0.5)
+            train_user_votes_num_acc_df.at[train_user_votes_num, "Confidence"] += abs(1-gt_vote - pred_score)
             train_user_votes_num_acc_df.at[train_user_votes_num, "Total"] += 1
             
             if train_same_vote_rate >= 0:
                 train_same_vote_rate_acc_df.at[train_same_vote_rate, "Acc"] += int(pred_vote == gt_vote)
-                train_same_vote_rate_acc_df.at[train_same_vote_rate, "Confidence"] += abs(pred_score - 0.5)
+                train_same_vote_rate_acc_df.at[train_same_vote_rate, "Confidence"] += abs(1-gt_vote - pred_score)
                 train_same_vote_rate_acc_df.at[train_same_vote_rate, "Total"] += 1
         
         debug("How well can the model deal with cold start problem?")
