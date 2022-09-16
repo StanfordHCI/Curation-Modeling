@@ -27,7 +27,7 @@ import seaborn as sns
 import nbimporter
 
 
-def get_normalization_weights(data:pd.DataFrame, train_submission_upvote_df:pd.DataFrame, config):
+def get_normalization_weights(data:pd.DataFrame, train_submission_upvote_df:pd.DataFrame = None, config = None):
     # user_weights
     if not config["user_normalization"]:
         user_weights = np.ones([len(data)])
@@ -266,42 +266,55 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
                 train_same_vote_rate_acc_df.at[train_same_vote_rate, "Confidence"] += abs(1-gt_vote - pred_score)
                 train_same_vote_rate_acc_df.at[train_same_vote_rate, "Total"] += 1
         
-        debug("How well can the model deal with cold start problem?")
+        debug("How well can the model deal with cold start problem? Accuracy & confidence given different #votes on this post")
         train_submission_votes_num_acc_df = train_submission_votes_num_acc_df[train_submission_votes_num_acc_df["Total"] > 0]
         train_submission_votes_num_acc_df["Accuracy"] = train_submission_votes_num_acc_df["Acc"]/train_submission_votes_num_acc_df["Total"]
         train_submission_votes_num_acc_df["Avg confidence"] = train_submission_votes_num_acc_df["Confidence"]/train_submission_votes_num_acc_df["Total"]
         train_submission_votes_num_acc_df["Total scaled"] = train_submission_votes_num_acc_df["Total"]/len(pred_ans)
         sns.set_theme(style="whitegrid")
-        debug('Accuracy & confidence given different #votes on this post')
         ax = sns.lineplot(data=train_submission_votes_num_acc_df[["Accuracy"]], legend = False) # , "Avg confidence", "Total scaled"  , legend = "auto"
         plt.ylabel("Accuracy")
         plt.xlabel("Number of votes a post has received in the training set")
         ax.set_ylim([0, 1])
         plt.show()
 
-        debug("How well can the model predict the lurkers' opinions?")
-        train_user_votes_num_acc_df = train_user_votes_num_acc_df[train_user_votes_num_acc_df["Total"] > 0]
-        train_user_votes_num_acc_df["Accuracy"] = train_user_votes_num_acc_df["Acc"]/train_user_votes_num_acc_df["Total"]
-        train_user_votes_num_acc_df["Avg confidence"] = train_user_votes_num_acc_df["Confidence"]/train_user_votes_num_acc_df["Total"]
-        train_user_votes_num_acc_df["Total scaled"] = train_user_votes_num_acc_df["Total"]/len(pred_ans)
+        debug("How well can the model predict the lurkers' opinions? Accuracy & confidence given different #votes from this user")
         sns.set_theme(style="whitegrid")
-        debug('Accuracy & confidence given different #votes from this user')
-        ax = sns.lineplot(data=train_user_votes_num_acc_df.loc[:500, ["Accuracy"]], legend = False) # , "Avg confidence", "Total scaled"  , legend = "auto"
+        train_user_votes_num_acc_df = train_user_votes_num_acc_df[train_user_votes_num_acc_df["Total"] > 0]
+        # train_user_votes_num_acc_df["Accuracy"] = train_user_votes_num_acc_df["Acc"]/train_user_votes_num_acc_df["Total"]
+        # train_user_votes_num_acc_df["Avg confidence"] = train_user_votes_num_acc_df["Confidence"]/train_user_votes_num_acc_df["Total"]
+        # train_user_votes_num_acc_df["Total scaled"] = train_user_votes_num_acc_df["Total"]/len(pred_ans)
+        # ax = sns.lineplot(data=train_user_votes_num_acc_df.loc[:500, ["Accuracy"]], legend = False) # , "Avg confidence", "Total scaled"  , legend = "auto"
+        x = [10 * _ for _ in range(0, 51)] # smoothing by bins
+        accs = [0 for _ in range(0, 51)]
+        totals = [0 for _ in range(0, 51)]
+        for i, acc in enumerate(train_user_votes_num_acc_df["Acc"].to_list()[:510]):
+            accs[i//10] += acc
+        for i, total in enumerate(train_user_votes_num_acc_df["Total"].to_list()[:510]):
+            totals[i//10] += total
+        ax = sns.lineplot(x = x, y = [accs[i]/totals[i] for i in range(51)], legend = False)
         plt.ylabel("Accuracy")
         plt.xlabel("Number of times a user has voted in the training set")
         ax.set_ylim([0, 1])
         plt.show()
         
-        debug("How well can the model predict the minority opinions?")
-        train_same_vote_rate_acc_df = train_same_vote_rate_acc_df[train_same_vote_rate_acc_df["Total"] > 0]
-        train_same_vote_rate_acc_df["Accuracy"] = train_same_vote_rate_acc_df["Acc"]/train_same_vote_rate_acc_df["Total"]
-        train_same_vote_rate_acc_df["Avg confidence"] = train_same_vote_rate_acc_df["Confidence"]/train_same_vote_rate_acc_df["Total"]
-        train_same_vote_rate_acc_df["Total scaled"] = train_same_vote_rate_acc_df["Total"]/len(pred_ans)
+        debug("How well can the model predict the minority opinions? Accuracy & confidence given different %votes that is same as the target vote")
         sns.set_theme(style="whitegrid")
-        debug('Accuracy & confidence given different %votes that is same as the target vote')
-        ax = sns.lineplot(data=train_same_vote_rate_acc_df[["Accuracy"]], legend = False) # , "Avg confidence", "Total scaled"  , legend = "auto"
+        train_same_vote_rate_acc_df = train_same_vote_rate_acc_df[train_same_vote_rate_acc_df["Total"] > 0]
+        # train_same_vote_rate_acc_df["Accuracy"] = train_same_vote_rate_acc_df["Acc"]/train_same_vote_rate_acc_df["Total"]
+        # train_same_vote_rate_acc_df["Avg confidence"] = train_same_vote_rate_acc_df["Confidence"]/train_same_vote_rate_acc_df["Total"]
+        # train_same_vote_rate_acc_df["Total scaled"] = train_same_vote_rate_acc_df["Total"]/len(pred_ans)
+        # ax = sns.lineplot(data=train_same_vote_rate_acc_df[["Accuracy"]], legend = False) # , "Avg confidence", "Total scaled"  , legend = "auto"
+        x = [5 * _ for _ in range(0, 21)] # smoothing by bins
+        accs = [0 for _ in range(0, 21)]
+        totals = [0 for _ in range(0, 21)]
+        for i, acc in enumerate(train_same_vote_rate_acc_df["Acc"].to_list()):
+            accs[i//5] += acc
+        for i, total in enumerate(train_same_vote_rate_acc_df["Total"].to_list()):
+            totals[i//5] += total
+        ax = sns.lineplot(x = x, y = [accs[i]/totals[i] if totals[i] != 0 else accs[i-1]/totals[i-1] for i in range(21)], legend = False)
         plt.ylabel("Accuracy")
-        plt.xlabel("Percentage of votes that is same as the target vote")
+        plt.xlabel("Percentage of votes that are the same as target vote")
         ax.set_ylim([0, 1])
         plt.show()
 
@@ -315,6 +328,7 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
 if __name__ == "__main__":
     args, config = parse_config(wandb)
     target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, train_submission_upvote_df, num_all_users = get_model_input(config)
+
 
     if not args.test:
         if config["model_type"] == "Transformer":
