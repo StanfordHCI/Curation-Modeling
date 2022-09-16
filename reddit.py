@@ -188,7 +188,25 @@ def get_user_info(username):
         return user_info, user_info_str
     except:
         return {}, ""
-    
+def is_mod(username):
+    try:
+        user = praw.models.Redditor(reddit, username)
+        return user.is_mod
+    except:
+        return False
+def get_user_karma(username):
+    try:
+        user = praw.models.Redditor(reddit, username)
+        return user.comment_karma + user.link_karma
+    except:
+        return 0
+#%%
+def get_subreddit_moderators(selected_subreddit):
+    moderators = reddit.subreddit(selected_subreddit.split("/")[-1]).moderator()
+    moderators = [str(mod) for mod in moderators]
+    return moderators
+
+#%%
 if __name__ == "__main__":
     print(reddit.user.me())
     # store_batch_submission_text_pmaw(["t3_ds9jwb"])

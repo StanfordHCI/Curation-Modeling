@@ -1,0 +1,8 @@
+vocab_size,10000
+maxlen,256
+training_data_count,25943
+validation_data_count,4578
+dense_layer_node,32
+epochs,40
+accuracy,0.6767853243066172
+F1 Score,71.61488300728807

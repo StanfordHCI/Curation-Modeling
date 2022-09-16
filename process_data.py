@@ -390,7 +390,32 @@ def get_model_input(config):
             with open(prepared_data_path, "wb") as f:
                 pickle.dump((target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, train_submission_upvote_df, num_all_users), f)
             debug(f"Prepared data saved to {prepared_data_path}")
+    if "USERNAME" not in config["categorical_features"]:
+        train_data = aggregate_majority_vote(train_data)
     return target, original_feature_map, categorical_features, string_features, train_data, test_data, test_data_info, train_submission_upvote_df, num_all_users
+
+def aggregate_majority_vote(train_data: pd.DataFrame):
+    train_data_list = []
+    submission_ids_set = set(train_data["SUBMISSION_ID"])
+    submission_ids_list = train_data["SUBMISSION_ID"].to_list()
+    submission_vote_list = train_data["VOTE"].to_list()
+    submission_id_data_map = {}
+    submission_vote_counter = defaultdict(Counter)
+    for row_i, submission_id in enumerate(tqdm(submission_ids_list)):
+        if submission_id not in submission_id_data_map:
+            submission_id_data_map[submission_id] = train_data.iloc[row_i]
+        submission_vote_counter[submission_id][submission_vote_list[row_i]] += 1
+    for submission_id in tqdm(submission_id_data_map):
+        vote_counter = submission_vote_counter[submission_id]
+        one_row = submission_id_data_map[submission_id]
+        if vote_counter[1] > vote_counter[0]:
+            one_row["VOTE"] = 1
+        elif vote_counter[1] < vote_counter[0]:
+            one_row["VOTE"] = 0
+        else:
+            one_row["VOTE"] = random.choice([0, 1])
+        train_data_list.append(one_row)
+    return pd.DataFrame(train_data_list)
 
 if __name__ == '__main__':
     args, config = parse_config()

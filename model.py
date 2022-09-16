@@ -161,11 +161,14 @@ class TransformerVoter(GeneralModel):
             self.lm_encoder = BertModel(lm_config)
         self.lm_encoder.resize_token_embeddings(len(self.tokenizer))
         self.prediction_head = nn.Linear(config["encoder_hidden_dim"], 1)
+        if 'USERNAME' in categorical_features:
+            self.special_token_pos = 2
+        else:
+            self.special_token_pos = 0
         self.post_init()
-
     def forward(self, input_ids, token_type_ids, attention_mask):
         encoder_out = self.lm_encoder(input_ids = input_ids, token_type_ids = token_type_ids, attention_mask = attention_mask).last_hidden_state
-        target_hidden = encoder_out[:, 2, :] # [bsz, hidden_size], 2 is for the USER_i
+        target_hidden = encoder_out[:, self.special_token_pos, :] # [bsz, hidden_size], 2 is for the USER_i
         # encoder_out_pooled = (attention_mask[:,:,None] * encoder_out).sum(axis=1) / attention_mask.sum(axis = 1, keepdim = True)
         logit = self.prediction_head(target_hidden)
         return self.out(logit) # [bsz, 1]
