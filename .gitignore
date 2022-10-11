@@ -6,6 +6,7 @@ data/
 output/
 trained_models/
 wandb/
+.env.development
 tools/Neural-Media-Bias-Detection-Using-Distant-Supervision-With-BABE/models/
 
 # Byte-compiled / optimized / DLL files
