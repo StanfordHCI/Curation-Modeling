@@ -61,7 +61,7 @@ def find_correlated_user_pairs(vote_data, num_same_posts_thres):
     return user_pair_agreement_level, correlated_user_pairs, selected_users
 
 def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USERNAME', config=None):
-    vote_data = pd.read_csv('data/reddit/44_million_votes.txt', sep = '\t')
+    vote_data = pd.read_csv(config["votes_data_path"], sep = '\t')
     # SUBMISSION_ID SUBREDDIT    CREATED_TIME    USERNAME    VOTE
     # t3_e0i7l4	r/nagatoro		TeddehBear	upvote
     vote_data['SUBMISSION_ID'] = vote_data['SUBMISSION_ID'].astype(str)
@@ -178,8 +178,8 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
             vote_data = pd.concat(vote_data_list, axis = 0)
             debug(new_vote_data_len = len(vote_data))
 
-    debug("Loading data/reddit/submission_info.txt")
-    submission_data = pd.read_csv('data/reddit/submission_info.txt', sep = '\t') # each submission is a separate post and have a forest of comments
+    debug(f"Loading {config['posts_data_path']}")
+    submission_data = pd.read_csv(config['posts_data_path'], sep = '\t') # each submission is a separate post and have a forest of comments
     # SUBMISSION_ID	SUBREDDIT	TITLE	AUTHOR	#_COMMENTS	NSFW	SCORE	UPVOTED_%	LINK
     # t3_d8vv6s	japanpics	Gloomy day in Kyoto	DeanTheDoge	13		1303	0.98	https://www.reddit.com/r/japanpics/comments/d8vv6s/gloomy_day_in_kyoto/
 
