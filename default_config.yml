@@ -11,14 +11,18 @@ encoder_hidden_dim: 768
 l2_normalization: 0.00001
 loss_function: binary_crossentropy
 eval_metrics: ["acc"] # ['binary_crossentropy', "auc", "acc"]
+
 # weight
 downvote_weight: 3
 user_normalization: equal_total # null for no normalization, equal_total for assigning user weight = 1/votes, equal_upvote_downvote for equal upvote weight and downvote weight for each user!
 minority_vote_normalization: False
+
 # data processing
+posts_data_path: data/reddit/submission_info.txt
+votes_data_path: data/reddit/44_million_votes.txt
 save_and_load_prepared_data: True
 sample_ratio: 1
-sample_method: ['most_votes'] # , "equal_up_down_votes", "add_weak_downvote", "selected_subreddits"
+sample_method: ['most_votes'] # "SUBMISSION_ID", "USERNAME", "equal_up_down_votes", "add_weak_downvote", "selected_subreddits"
 selected_subreddits: ["r/politics"]
 categorical_features: ['USERNAME', 'AUTHOR'] # 'SUBMISSION_ID' #! make sure "USERNAME" is the first one
 string_features: ['SUBREDDIT', "CREATED_TIME", 'NSFW', "SUBMISSION_URL", "SUBMISSION_TEXT"]
