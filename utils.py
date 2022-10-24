@@ -112,15 +112,36 @@ def load_model_dict(save_dir, type = "latest", device = "cpu"):
         return None
 
 def load_model(save_dir, model, optim, initial_epoch, best_eval_acc, type = "latest"):
-    debug(f"Loading {type} model...")
+    # debug(f"Loading {type} model...")
     save_dict = load_model_dict(save_dir, type = type, device = model.device)
     if save_dict:
-        model.load_state_dict(save_dict['state_dict'])
-        # if lm_encoder is not None and 'lm_encoder' in save_dict:
-        #     lm_encoder.load_state_dict(save_dict['lm_encoder'])
-        optim.load_state_dict(save_dict['optimizer'])
-        initial_epoch = save_dict['epoch']
-        best_eval_acc = save_dict['eval_acc']
+        target_dict = model.state_dict()
+        num_target_fit, num_target_expand = 0, 0
+        for name, params in save_dict['state_dict'].items():
+            if name not in target_dict:
+                print(f"{name} not in target_dict")
+                continue
+            if params.size() == target_dict[name].size():
+                target_dict[name] = params
+                num_target_fit += 1
+            else: # param size do not match
+                if len(params.size()) == 2:
+                    old_size = params.size()
+                    new_size = target_dict[name].size()
+                    target_dict[name][: min(old_size[0], new_size[0]),:min(old_size[1], new_size[1])] = params[: min(old_size[0], new_size[0]),:min(old_size[1], new_size[1])]
+                    assert target_dict[name].size() == model.state_dict()[name].size()
+                elif len(params.size()) == 1:
+                    old_size = int(params.size(0))
+                    new_size = int(target_dict[name].size(0))
+                    target_dict[name][: min(old_size, new_size)] = params[: min(old_size, new_size)]
+                print("model's state_dict expand parameter {} from size {} to {}".format(
+                    name, old_size, new_size))
+                num_target_expand += 1
+        # print("{} parameters (fit: {}, expand: {}) initiated from {}".format(num_target_fit+num_target_expand, num_target_fit, num_target_expand, len(save_dict['state_dict'])))
+        model.load_state_dict(target_dict, strict=True)
+    # optim.load_state_dict(save_dict['optimizer'])
+    initial_epoch = save_dict['epoch']
+    best_eval_acc = save_dict['eval_acc']
     return model, optim, initial_epoch, best_eval_acc, save_dict
 
 def print_log(log_path, *strs, **strss):

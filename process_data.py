@@ -186,10 +186,11 @@ def sample_load_dataset(sample_ratio = 1, sample_method:Union[str, list] = 'USER
     # fix bugs in data
     submission_data['SUBMISSION_ID'] = submission_data['SUBMISSION_ID'].astype(str)
     assert len(submission_data) == len(set(submission_data['SUBMISSION_ID'])), "submission ids should be unique"
-    submission_data['SUBREDDIT'] = ["r/" + subreddit for  subreddit in submission_data['SUBREDDIT']]
-    submission_data['LINK'] = ["https://www.reddit.com" + link if link.startswith('/r/') else link for link in submission_data['LINK']]
+    submission_data['SUBREDDIT'] = ["r/" + str(subreddit) if str(subreddit) != "nan" else "r/" for subreddit in submission_data['SUBREDDIT']]
+    submission_data['LINK'] = [("https://www.reddit.com" + link if link.startswith('/r/') else link) if str(link) != "nan" else "" for link in submission_data['LINK']]
 
     all_data = vote_data.merge(submission_data, on=['SUBMISSION_ID', 'SUBREDDIT'], how='inner')
+    debug(all_data=all_data)
     return all_data
 
 def get_selected_feature(config):
@@ -413,6 +414,7 @@ def aggregate_majority_vote(train_data: pd.DataFrame):
         elif vote_counter[1] < vote_counter[0]:
             one_row["VOTE"] = 0
         else:
+            random.seed(42)
             one_row["VOTE"] = random.choice([0, 1])
         train_data_list.append(one_row)
     return pd.DataFrame(train_data_list)

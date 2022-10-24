@@ -54,7 +54,9 @@ class RedditDataset(Dataset):
                 for weight_i in range(len(updown_voted_users)):
                     weight = weight * 2/3
                     sample_weights.append(weight)
+                random.seed(42)
                 sample_num = random.choices(list(range(len(updown_voted_users) + 1)), sample_weights)[0]
+                random.seed(42)
                 modified_updown_voted_users = random.sample(list(updown_voted_users), sample_num)
             else:
                 print(f"Original {vote}d users:", list(updown_voted_users))
@@ -67,6 +69,7 @@ class RedditDataset(Dataset):
             modified_updown_voted_users = list(updown_voted_users)
 
         # add target user to peers
+        random.seed(42)
         if self.add_target_user_ratio != 0 and random.random() < self.add_target_user_ratio:
             if (label == 0 and vote == "downvote") or (label == 1 and vote == "upvote"):
                 # modified_updown_voted_users.append(target_user)
