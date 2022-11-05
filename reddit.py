@@ -163,7 +163,8 @@ def store_all_submission_text(submission_ids, batch_size = 10000, ret = "list"):
         for start_i in tqdm(range(0, len(remain_ids), batch_size)):
             store_batch_submission_text_praw(remain_ids[start_i : start_i + batch_size])
     # pickle.dump(remain_ids, open("data/reddit/tmp_remain_ids.pt", "wb"))
-def get_batch_submission_text(submission_ids):
+def get_batch_submission_text(submission_data):
+    submission_ids = submission_data['SUBMISSION_ID']
     submission_id_text_map = {}
     submission_id_url_map = {}
     for start_i in range(0, len(submission_ids), 10000):
@@ -171,7 +172,11 @@ def get_batch_submission_text(submission_ids):
         for item in existing_items:
             submission_id_text_map[item.id] = item.text
             submission_id_url_map[item.id] = item.url
-    return [submission_id_text_map.get(id, "") for id in submission_ids], [submission_id_url_map.get(id, "") for id in submission_ids]
+    if submission_id_text_map == {}:
+        submission_text = list(submission_data["TITLE"])
+    else:
+        submission_text = [submission_id_text_map.get(id, "") for id in submission_ids]
+    return submission_text, [submission_id_url_map.get(id, "") for id in submission_ids]
 
 def get_user_info(username):
     try:
