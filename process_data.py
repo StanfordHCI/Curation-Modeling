@@ -372,7 +372,7 @@ def get_model_input(config):
     else:
         debug("Preparing data...")
         all_data = sample_load_dataset(config["sample_ratio"], config["sample_method"], config)
-        all_data["SUBMISSION_TEXT"], all_data["SUBMISSION_URL"] = get_batch_submission_text(all_data['SUBMISSION_ID'])
+        all_data["SUBMISSION_TEXT"], all_data["SUBMISSION_URL"] = get_batch_submission_text(all_data)
         categorical_features, string_features, target = get_selected_feature(config)
 
         cleared_data = clean_data(all_data, categorical_features, string_features)
