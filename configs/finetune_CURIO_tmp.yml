@@ -12,7 +12,7 @@ train_test_different_submissions: False
 learning_rate: 0.00003
 load_pretrained_model: True
 num_epochs: 20
-downvote_weight: 3
+downvote_weight: 2.5
 user_normalization: equal_upvote_downvote # equal upvote weight and downvote weight for each user!
 minority_vote_normalization: True
 
@@ -20,6 +20,7 @@ batch_size: 64
 sample_part_voted_users: False
 use_voted_users_feature: False
 add_target_user_ratio: 0
+active_user_votes_thres: 0
 device: [2]
 submission_source: "test_data" # "test_data" or "custom"
 
