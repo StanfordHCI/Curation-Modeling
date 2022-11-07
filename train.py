@@ -242,7 +242,6 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
         train_user_votes_num_acc_df = pd.DataFrame(np.zeros((max(train_user_votes_nums) + 1,3)), columns=['Acc', 'Confidence', 'Total'])
         train_submission_votes_num_acc_df = pd.DataFrame(np.zeros((max(train_submission_votes_nums) + 1,3)), columns=['Acc', 'Confidence', 'Total'])
         train_same_vote_rate_acc_df = pd.DataFrame(np.zeros((101,3)), columns=['Acc', 'Confidence', 'Total'])
-
         
         for vote_i, pred_score in enumerate(pred_ans):
             pred_vote = float(pred_score > 0.5)
@@ -263,6 +262,11 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
                 train_same_vote_rate_acc_df.at[train_same_vote_rate, "Acc"] += int(pred_vote == gt_vote)
                 train_same_vote_rate_acc_df.at[train_same_vote_rate, "Confidence"] += abs(1-gt_vote - pred_score)
                 train_same_vote_rate_acc_df.at[train_same_vote_rate, "Total"] += 1
+        
+        debug("Confidence distribution:")
+        sns.set_theme(style="whitegrid")
+        ax = sns.histplot(data=pred_ans, binwidth = 0.01)
+        plt.show()
         
         debug("How well can the model deal with cold start problem? Accuracy & confidence given different #votes on this post")
         train_submission_votes_num_acc_df = train_submission_votes_num_acc_df[train_submission_votes_num_acc_df["Total"] > 0]
