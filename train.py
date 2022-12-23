@@ -93,6 +93,8 @@ def train_model(config, model, data:pd.DataFrame, weights=None, batch_size=256, 
     best_eval_acc, best_eval_acc_weight = 0, 0
     if config["load_pretrained_model"] and not step_generator:
         model, optim, initial_epoch, best_eval_acc_weight, save_dict = load_model(config["save_model_dir"], model, optim, initial_epoch, best_eval_acc_weight)
+        if config["reset_best_eval_acc"]:
+            best_eval_acc_weight = 0
     if model.gpus:
         if not step_generator:
             print('parallel running on these gpus:', model.gpus)
@@ -271,21 +273,21 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
         debug("How well can the model deal with cold start problem? Accuracy & confidence given different #votes on this post")
         train_submission_votes_num_acc_df = train_submission_votes_num_acc_df[train_submission_votes_num_acc_df["Total"] > 0]
         
-        if smooth:
-            x = [3 * _ for _ in range(0, 7)] # smoothing by bins
-            accs = [0 for _ in range(0, 7)]
-            totals = [0 for _ in range(0, 7)]
-            for i, acc in enumerate(train_submission_votes_num_acc_df["Acc"].to_list()):
-                accs[i//3] += acc
-            for i, total in enumerate(train_submission_votes_num_acc_df["Total"].to_list()):
-                totals[i//3] += total
-            ax = sns.lineplot(x = x, y = [accs[i]/totals[i] if totals[i] != 0 else accs[i-1]/totals[i-1] for i in range(7)], legend = False)
-        else:
-            train_submission_votes_num_acc_df["Accuracy"] = train_submission_votes_num_acc_df["Acc"]/train_submission_votes_num_acc_df["Total"]
-            train_submission_votes_num_acc_df["Avg confidence"] = train_submission_votes_num_acc_df["Confidence"]/train_submission_votes_num_acc_df["Total"]
-            train_submission_votes_num_acc_df["Total scaled"] = train_submission_votes_num_acc_df["Total"]/len(pred_ans)
-            sns.set_theme(style="whitegrid")
-            ax = sns.lineplot(data=train_submission_votes_num_acc_df[["Accuracy", "Avg confidence", "Total scaled"]], legend = "auto")
+        # if smooth:
+            # x = [3 * _ for _ in range(0, 7)] # smoothing by bins
+            # accs = [0 for _ in range(0, 7)]
+            # totals = [0 for _ in range(0, 7)]
+            # for i, acc in enumerate(train_submission_votes_num_acc_df["Acc"].to_list()):
+            #     accs[i//3] += acc
+            # for i, total in enumerate(train_submission_votes_num_acc_df["Total"].to_list()):
+            #     totals[i//3] += total
+            # ax = sns.lineplot(x = x, y = [accs[i]/totals[i] if totals[i] != 0 else accs[i-1]/totals[i-1] for i in range(7)], legend = False)
+        # else:
+        train_submission_votes_num_acc_df["Accuracy"] = train_submission_votes_num_acc_df["Acc"]/train_submission_votes_num_acc_df["Total"]
+        train_submission_votes_num_acc_df["Avg confidence"] = train_submission_votes_num_acc_df["Confidence"]/train_submission_votes_num_acc_df["Total"]
+        train_submission_votes_num_acc_df["Total scaled"] = train_submission_votes_num_acc_df["Total"]/len(pred_ans)
+        sns.set_theme(style="whitegrid")
+        ax = sns.lineplot(data=train_submission_votes_num_acc_df[["Accuracy", "Avg confidence", "Total scaled"]], legend = "auto")
         plt.ylabel("Accuracy")
         plt.xlabel("Number of votes a post has received in the training set")
         ax.set_ylim([-0.01, 1.01])
@@ -298,16 +300,16 @@ def evaluate_model(config, model, data:pd.DataFrame, weights = None, batch_size=
         train_user_votes_num_acc_df = train_user_votes_num_acc_df[train_user_votes_num_acc_df["Total"] > 0]
         
         if smooth:
-            x = [50 * _ for _ in range(0, 7)] # smoothing by bins
-            accs = [0 for _ in range(0, 7)]
-            totals = [0 for _ in range(0, 7)]
+            x = [50 * _ for _ in range(0, 70)] # smoothing by bins
+            accs = [0 for _ in range(0, 70)]
+            totals = [0 for _ in range(0, 70)]
             train_user_votes_num_acc_dict = train_user_votes_num_acc_df[["Acc"]].to_dict()["Acc"]
             train_user_votes_num_total_dict = train_user_votes_num_acc_df[["Total"]].to_dict()["Total"]
             for num, acc in train_user_votes_num_acc_dict.items():
                 accs[num//50] += acc
             for num, total in train_user_votes_num_total_dict.items():
                 totals[num//50] += total
-            ax = sns.lineplot(x = x, y = [accs[i]/totals[i] if totals[i] > 0 else 0 for i in range(7)], legend = False)
+            ax = sns.lineplot(x = x, y = [accs[i]/totals[i] if totals[i] > 0 else 0 for i in range(70)], legend = False)
         else:
             train_user_votes_num_acc_df["Avg confidence"] = train_user_votes_num_acc_df["Confidence"]/train_user_votes_num_acc_df["Total"]
             train_user_votes_num_acc_df["Total scaled"] = train_user_votes_num_acc_df["Total"]/len(pred_ans)

@@ -250,22 +250,19 @@ def get_feature_columns(data, sparse_features, sparse_features_embed_dims, varle
     debug(feature_names=feature_names)
     return all_feature_columns, feature_names, max_voted_users
 """
-def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0, train_test_different_submissions = False):
+def divide_train_test_set(data:pd.DataFrame, train_at_least_n_votes = 0, train_test_different_submissions = False, testset_proportion = 0.2):
     random.seed(42)
     if train_at_least_n_votes == 0:
         data = data.sample(frac=1).reset_index(drop=True)
         if not train_test_different_submissions:
-            # train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
-            # debug(train_data=train_data, test_data=test_data)
-            # assert len(set(test_data.index) & set(train_data.index)) == 0
             all_indices = list(data.index)
-            test_indices = random.sample(all_indices, int(0.2 * len(all_indices)))
+            test_indices = random.sample(all_indices, int(testset_proportion * len(all_indices)))
             test_data = data[data.index.isin(test_indices)]
             train_data = data[~data.index.isin(test_indices)]
         else:
             debug("Splitting train test set using different submissions")
             all_submissions = list(set(data["SUBMISSION_ID"]))
-            test_submissions = random.sample(all_submissions, int(0.2 * len(all_submissions)))
+            test_submissions = random.sample(all_submissions, int(testset_proportion * len(all_submissions)))
             test_data = data[data["SUBMISSION_ID"].isin(test_submissions)]
             train_data = data[~data["SUBMISSION_ID"].isin(test_submissions)]
     else:
@@ -380,7 +377,7 @@ def get_model_input(config):
         num_all_users = len(set(featured_data["USERNAME"]))
         debug(featured_data=featured_data)
         # all_feature_columns, feature_names, max_voted_users = get_feature_columns(featured_data, sparse_features, sparse_features_embed_dims, varlen_sparse_features, varlen_sparse_features_embed_dims, dense_features)
-        train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"], train_test_different_submissions = config["train_test_different_submissions"])
+        train_data, test_data = divide_train_test_set(featured_data, train_at_least_n_votes = config["train_at_least_n_votes"], train_test_different_submissions = config["train_test_different_submissions"], testset_proportion = config["testset_proportion"])
         test_data_info, train_submission_upvote_df = get_test_data_info(train_data, test_data)
         # train_model_input = {name:train_data[name] for name in feature_names if name in train_data}
         # test_model_input = {name:test_data[name] for name in feature_names if name in test_data}

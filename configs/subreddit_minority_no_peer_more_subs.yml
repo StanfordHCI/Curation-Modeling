@@ -1,5 +1,6 @@
 sample_method: ["selected_subreddits"]
-selected_subreddits: ["r/politics", "r/PoliticalDiscussion", "r/Conservative", "r/Liberal", "r/Republican", "r/democrats", "r/VoteBlue", "r/Jokes", "r/science", "r/ScienceFacts", "r/technology", "r/shittyaskscience", "r/Feminism", "r/MensRights", "r/lesbian", "r/LesbianActually", "r/gay", "r/trans", "r/teenagers", "r/Showerthoughts", "r/gaming", "r/tattoos", "r/MakeupAddiction", "r/Music", "r/punk", "r/Fitness", "r/travel", "r/worldnews", "r/europe", "r/france", "r/unitedkingdom", "r/canada", "r/australia", "r/india", "r/Philippines", "r/britishproblems", "r/Futurology", "r/programming", "r/hacking", "r/Bitcoin", "r/conspiracy", "r/atheism", "r/Christianity", "r/Buddhism", "r/islam", "r/movies", "r/RomanceBooks", "r/romancemovies", "r/Marvel", "r/marvelstudios", "r/scifi", "r/sciencefiction", "r/Drama", "r/anime", "r/Documentaries", "r/StarWars"]
+selected_subreddits: ["r/politics", "r/PoliticalDiscussion", "r/Conservative", "r/Liberal", "r/Republican", "r/democrats", "r/VoteBlue", "r/Jokes", "r/Showerthoughts", "r/science", "r/ScienceFacts", "r/technology", "r/shittyaskscience", "r/gaming", "r/tattoos", "r/MakeupAddiction", "r/Music", "r/punk", "r/Fitness", "r/travel", "r/programming", "r/hacking", "r/Bitcoin", "r/conspiracy", "r/Futurology", "r/movies", "r/RomanceBooks", "r/Marvel", "r/marvelstudios", "r/scifi", "r/sciencefiction", "r/Drama", "r/anime", "r/Documentaries", "r/StarWars", "r/teenagers", "r/worldnews", "r/britishproblems", "r/europe", "r/france", "r/unitedkingdom", "r/canada", "r/australia", "r/india", "r/Philippines", "r/atheism", "r/Christianity", "r/Buddhism", "r/islam", "r/Feminism", "r/MensRights", "r/LesbianActually", "r/gay", "r/trans"]
+
 model_type: Transformer
 encoder_hidden_dim: 256
 language_model_encoder_name: prajjwal1/bert-mini
@@ -21,4 +22,3 @@ use_voted_users_feature: False
 add_target_user_ratio: 0
 device: [2]
 submission_source: "test_data" # "test_data" or "custom"
-
