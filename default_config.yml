@@ -4,6 +4,7 @@ num_epochs: 25
 batch_size: 8192
 learning_rate: 0.0001
 load_pretrained_model: False
+reset_best_eval_acc: True
 model_type: MLR
 use_language_model_encoder: False
 language_model_encoder_name: roberta-base
@@ -23,8 +24,9 @@ votes_data_path: data/reddit/44_million_votes.txt
 save_and_load_prepared_data: True
 sample_ratio: 1
 sample_method: ['most_votes'] # "SUBMISSION_ID", "USERNAME", "equal_up_down_votes", "add_weak_downvote", "selected_subreddits"
+testset_proportion: 0.2
 selected_subreddits: [] # "r/politics"
-categorical_features: ['USERNAME', 'AUTHOR'] # 'SUBMISSION_ID' #! make sure "USERNAME" is the first one
+categorical_features: ['USERNAME', 'AUTHOR'] # 'SUBMISSION_ID' # make sure "USERNAME" is the first one # if "USERNAME" is not in categorical_features, we use the majority vote as the target vote for training
 string_features: ['SUBREDDIT', "CREATED_TIME", 'NSFW', "SUBMISSION_URL", "SUBMISSION_TEXT"]
 use_voted_users_feature: True # will add "UPVOTED_USERS" and "DOWNVOTED_USERS"
 sample_part_voted_users: True
