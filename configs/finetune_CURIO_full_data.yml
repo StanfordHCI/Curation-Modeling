@@ -2,7 +2,8 @@ posts_data_path: data/Curio/post_info.txt
 votes_data_path: data/Curio/all_votes.txt
 sample_ratio: 1
 sample_method: 'USERNAME'
-testset_proportion: 0.01
+testset_proportion: 0.05
+validset_proportion: 0.05
 model_type: Transformer
 encoder_hidden_dim: 256
 language_model_encoder_name: prajjwal1/bert-mini

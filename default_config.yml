@@ -25,6 +25,7 @@ save_and_load_prepared_data: True
 sample_ratio: 1
 sample_method: ['most_votes'] # "SUBMISSION_ID", "USERNAME", "equal_up_down_votes", "add_weak_downvote", "selected_subreddits"
 testset_proportion: 0.2
+validset_proportion: 0.2
 selected_subreddits: [] # "r/politics"
 categorical_features: ['USERNAME', 'AUTHOR'] # 'SUBMISSION_ID' # make sure "USERNAME" is the first one # if "USERNAME" is not in categorical_features, we use the majority vote as the target vote for training
 string_features: ['SUBREDDIT', "CREATED_TIME", 'NSFW', "SUBMISSION_URL", "SUBMISSION_TEXT"]
