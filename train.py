@@ -368,7 +368,7 @@ if __name__ == "__main__":
             model = LinearModel(config, categorical_features, string_features, original_feature_map, num_all_users=num_all_users)
             
         train_weights = get_normalization_weights(train_data, train_submission_upvote_df, config)
-        best_eval_acc, best_eval_acc_weight, latest_eval_acc, latest_eval_acc_weight, train_loss, train_acc = next(train_model(config, model, train_data, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=0.2))
+        best_eval_acc, best_eval_acc_weight, latest_eval_acc, latest_eval_acc_weight, train_loss, train_acc = next(train_model(config, model, train_data, weights = train_weights, batch_size=config['batch_size'], epochs=config['num_epochs'], verbose=2, validation_split=config['validset_proportion']))
         wandb.alert(
             title="Finished training!", 
             text=f"best_eval_acc: {best_eval_acc}, best_eval_acc_weight: {best_eval_acc_weight}, latest_eval_acc: {latest_eval_acc}, latest_eval_acc_weight: {latest_eval_acc_weight}, train_loss: {train_loss}, train_acc: {train_acc}"
