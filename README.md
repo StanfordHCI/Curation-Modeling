@@ -1,6 +1,8 @@
 # Curation Modeling
 
-This repository contains the implementation of the Cura system.
+This repository contains the official implementation of the Cura system from paper "Cura: Curation at Social Media Scale".
+
+The raw Reddit data and the checkpoint of the best model are available at: [Google Drive](https://drive.google.com/drive/folders/1FtsfxWZl8-fn3uI5zHnnhYoNb0pTl8o6?usp=sharing).
 
 ## Setting up
 
